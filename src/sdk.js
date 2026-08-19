@@ -5,12 +5,17 @@ let inited = false;
 export async function initSDK() {
   try {
     if (window.CrazyGames && window.CrazyGames.SDK) {
-      await window.CrazyGames.SDK.init();
+      // SDK.init() may hang forever on non-whitelisted domains (sitelock),
+      // e.g. GitHub Pages — race it against a timeout so the game always boots.
+      const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('sdk init timeout')), 3000));
+      await Promise.race([window.CrazyGames.SDK.init(), timeout]);
       sdk = window.CrazyGames.SDK;
       inited = true;
     }
   } catch (e) {
-    console.warn('CrazyGames SDK init failed (local dev?)', e);
+    console.warn('CrazyGames SDK unavailable (local dev / non-CG domain)', e);
+    sdk = null;
+    inited = false;
   }
   return inited;
 }
