@@ -431,8 +431,8 @@ function frame(t) {
 
 // ---------- boot ----------
 async function boot() {
-  loadingStart();
   await initSDK();
+  loadingStart();
   best = loadBest();
   setMuted(getMuteSetting());
   onSettingsChange((s) => { if (s && 'muteAudio' in s) setMuted(!!s.muteAudio); });
