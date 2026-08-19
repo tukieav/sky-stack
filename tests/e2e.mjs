@@ -15,7 +15,8 @@ let failed = false;
 function fail(msg) { console.error('FAIL: ' + msg); failed = true; }
 
 await page.goto(URL, { waitUntil: 'networkidle' });
-await page.waitForTimeout(1500);
+await page.waitForFunction(() => !!window.__astro, { timeout: 30000 });
+await page.waitForTimeout(500);
 
 const st = async () => page.evaluate(() => window.__astro.getState());
 async function waitState(pred, timeout = 20000) {
