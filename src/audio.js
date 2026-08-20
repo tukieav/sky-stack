@@ -66,3 +66,48 @@ export function clickSound() {
   ensureCtx();
   tone(660, 0.06, 'sine', 0.12);
 }
+
+// Reward jingles
+export function coinSound() {
+  ensureCtx();
+  tone(880, 0.09, 'sine', 0.18);
+  tone(1320, 0.12, 'sine', 0.14, 0.05);
+}
+
+export function milestoneSound() {
+  ensureCtx();
+  [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.22, 'triangle', 0.22, i * 0.08));
+}
+
+// ---------- background music: gentle procedural arpeggio loop ----------
+let musicOn = false;
+let musicTimer = null;
+let step = 0;
+const SCALE = [261.6, 329.6, 392.0, 523.3, 392.0, 329.6]; // C-E-G arpeggio
+
+function musicTick() {
+  if (!musicOn || muted || !ctx) return;
+  const f = SCALE[step % SCALE.length] * (step % 12 < 6 ? 1 : 0.75);
+  const t0 = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = f;
+  g.gain.setValueAtTime(0.045, t0);
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.55);
+  osc.connect(g); g.connect(masterGain);
+  osc.start(t0); osc.stop(t0 + 0.6);
+  step++;
+}
+
+export function setMusicOn(on) {
+  musicOn = on;
+  if (on) {
+    ensureCtx();
+    if (!musicTimer) musicTimer = setInterval(musicTick, 300);
+  } else if (musicTimer) {
+    clearInterval(musicTimer);
+    musicTimer = null;
+  }
+}
+export function getMusicOn() { return musicOn; }
