@@ -22,6 +22,8 @@ export async function initSDK() {
 
 export function sdkAvailable() { return inited; }
 
+export function getSDK() { return sdk; }
+
 export function gameplayStart() {
   try { if (sdk) sdk.game.gameplayStart(); } catch (e) {}
 }
