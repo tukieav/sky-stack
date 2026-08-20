@@ -31,7 +31,12 @@ FEATURES
 - Fly from daytime skies into starry space as your tower rises
 - Speed increases with height for an ever-growing challenge
 - Watch cut pieces tumble away with satisfying physics
-- Your best score is saved across devices
+- Earn CLOUDS ☁ from perfects, milestones and height — spend them in the shop
+- 6 unlockable tower/sky themes (Sunset, Ocean, Forest, Neon, Mono)
+- Permanent upgrades (wider starting base) + Slow-Mo and Magnet power-ups
+- Daily missions and a day-streak bonus that grows each day you return
+- Floor milestones every 25 floors with cloud rewards
+- Your best score and full progress are saved across devices
 
 HOW TO PLAY
 1. Tap / click / press Space to drop the moving block
@@ -49,11 +54,12 @@ Click / tap / Space — drop the block.
 - HTML5 SDK v3, manual init before game start
 - gameplayStart/gameplayStop on play/game over/ad breaks
 - loadingStart/loadingStop around boot
-- Midgame ad on "Play Again" after game over
+- Midgame ad on "Play Again" after game over (throttled: max 1 per 90 s, instant restart otherwise)
 - Rewarded ad "Continue" (resume run from current height with a 70%-width block, once per run)
-- happytime() every 25 levels climbed
+- Rewarded ad "×2 Clouds" on the game-over screen (doubles the run's currency)
+- happytime() every 25 floors climbed and on daily-mission completion
 - game.settings.muteAudio respected + settings change listener
-- Best score via data module with localStorage fallback
+- Full progress (best score, clouds currency, themes, upgrades, missions, streak) via data module with localStorage fallback
 - No external requests, all assets procedural (Canvas 2D + WebAudio), bundle ~10 KB
 - Touch + mouse + keyboard; portrait-friendly, works on low-end devices
 - Live demo: https://tukieav.github.io/sky-stack/
