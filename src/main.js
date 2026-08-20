@@ -47,6 +47,13 @@ let lastAdT = 0;           // throttle midgame ads
 let slowmoT = 0, magnetT = 0;
 let shopMsgT = 0, shopMsg = '';
 let runBaseW = BASE_W;
+let flashT = 0;            // soft white flash on perfect
+let windT = 0;             // global animation clock (sway, drift)
+let flyers = [];           // birds / planes / satellites {kind,x,y,vx,t,flap}
+let flyerTimer = 4;
+let ropePulse = 0;         // crane cable recoil after release
+let lastDropX = GAME_W / 2;
+let lastBodyBg = '';
 
 for (let i = 0; i < 120; i++) {
   stars.push({ x: Math.random() * GAME_W, y: Math.random() * 4000, r: Math.random() * 1.6 + 0.4, a: 0.3 + Math.random() * 0.6 });
@@ -140,6 +147,8 @@ function doDrop() {
   const oL = Math.max(curL, prevL), oR = Math.min(curR, prevR);
   const overlap = oR - oL;
   const y = moving.y;
+  ropePulse = 0.35;
+  lastDropX = moving.cx;
 
   if (overlap < MIN_W) { // complete miss or sliver → whole block falls, game over
     debris.push({ x: moving.cx, y, w: moving.w, h: BH, vx: moving.dir * 60, vy: -40, rot: 0, vr: (Math.random() - 0.5) * 4, hue: moving.hue, life: 2 });
@@ -157,13 +166,16 @@ function doDrop() {
     let w = moving.w;
     let grew = false;
     if (perfectCombo >= 3 && w < runBaseW) { w = Math.min(runBaseW, w + 10); grew = true; }
-    placed = { cx: prev.cx, w, level: moving.level, hue: moving.hue };
+    placed = { cx: prev.cx, w, level: moving.level, hue: moving.hue, perfectT: 0.9 };
     const bonus = 5 * perfectCombo;
     score += 1 + bonus;
     hitStop = 0.06;
+    flashT = 0.18;
     perfectSound(perfectCombo);
     burst(prev.cx, y + BH / 2, moving.hue, 26, 220);
-    floatText(prev.cx, y - 10, 'PERFECT +' + bonus, '#ffe86b', 30);
+    burst(prev.cx, y + BH / 2, 48, 14, 300);   // gold sparks
+    floatText(prev.cx, y - 10, 'PERFECT!', '#ffe86b', 34);
+    floatText(prev.cx, y + 24, '+' + bonus, '#fff6c9', 22);
     earnClouds(1 + Math.floor(perfectCombo / 3), prev.cx, y - 70);
     if (grew) { growSound(); floatText(prev.cx, y - 44, 'GROW!', '#7bffb0', 24); }
   } else {
@@ -352,8 +364,30 @@ window.addEventListener('keydown', (e) => {
 // ---------- update ----------
 let persistAcc = 0;
 function update(dt) {
+  windT += dt;
   camY += (targetCamY - camY) * Math.min(1, dt * 5);
   if (shake > 0) shake = Math.max(0, shake - dt * 30);
+  if (flashT > 0) flashT = Math.max(0, flashT - dt);
+  if (ropePulse > 0) ropePulse = Math.max(0, ropePulse - dt);
+  // fade perfect glow on recent blocks
+  for (let i = Math.max(0, blocks.length - 5); i < blocks.length; i++) {
+    if (blocks[i].perfectT > 0) blocks[i].perfectT -= dt;
+  }
+  // ambient flyers: birds low, planes mid, satellites high
+  flyerTimer -= dt;
+  if (flyerTimer <= 0 && (state === 'playing' || state === 'menu')) {
+    flyerTimer = 5 + Math.random() * 6;
+    const kind = level < 14 ? 'bird' : level < 42 ? 'plane' : 'sat';
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    flyers.push({
+      kind, t: 0, flap: Math.random() * 6,
+      x: dir > 0 ? -60 : GAME_W + 60,
+      y: 80 + Math.random() * 320,
+      vx: dir * (kind === 'bird' ? 40 + Math.random() * 25 : kind === 'plane' ? 90 + Math.random() * 40 : 26 + Math.random() * 14),
+    });
+  }
+  for (const f of flyers) { f.t += dt; f.flap += dt * 9; f.x += f.vx * dt; }
+  flyers = flyers.filter(f => f.x > -120 && f.x < GAME_W + 120 && f.t < 40);
   if (hitStop > 0) { hitStop -= dt; return; }
   if (slowmoT > 0) slowmoT = Math.max(0, slowmoT - dt);
   if (magnetT > 0) magnetT = Math.max(0, magnetT - dt);
@@ -394,32 +428,272 @@ function update(dt) {
 }
 
 // ---------- draw ----------
+// Altitude bands: ground -> cloud layer -> stratosphere -> space.
 function skyColors(lv) {
   const [dTop, nTop, dBot, nBot] = theme().sky;
   const t = Math.min(1, lv / 90);
-  const lerp = (a, b) => Math.round(a + (b - a) * t);
-  const top = `rgb(${lerp(dTop[0], nTop[0])},${lerp(dTop[1], nTop[1])},${lerp(dTop[2], nTop[2])})`;
-  const bot = `rgb(${lerp(dBot[0], nBot[0])},${lerp(dBot[1], nBot[1])},${lerp(dBot[2], nBot[2])})`;
-  return [top, bot];
+  // ease so space arrives late and dramatically
+  const e = t * t * (3 - 2 * t);
+  const lerp = (a, b) => Math.round(a + (b - a) * e);
+  const top = [lerp(dTop[0], nTop[0]), lerp(dTop[1], nTop[1]), lerp(dTop[2], nTop[2])];
+  const bot = [lerp(dBot[0], nBot[0]), lerp(dBot[1], nBot[1]), lerp(dBot[2], nBot[2])];
+  return [top, bot, e];
 }
 
-function drawBlock(cx, y, w, hue, glow) {
+function drawSky() {
+  const [top, bot, e] = skyColors(level);
+  const bg = ctx.createLinearGradient(0, 0, 0, GAME_H);
+  bg.addColorStop(0, `rgb(${top[0]},${top[1]},${top[2]})`);
+  bg.addColorStop(0.55, `rgb(${Math.round((top[0] + bot[0]) / 2)},${Math.round((top[1] + bot[1]) / 2)},${Math.round((top[2] + bot[2]) / 2)})`);
+  bg.addColorStop(1, `rgb(${bot[0]},${bot[1]},${bot[2]})`);
+  ctx.fillStyle = bg;
+  ctx.fillRect(-20, -20, GAME_W + 40, GAME_H + 40);
+  // keep page letterbox in sync with sky so fullscreen has no dead zones
+  const bgCss = `rgb(${bot[0]},${bot[1]},${bot[2]})`;
+  if (bgCss !== lastBodyBg) { lastBodyBg = bgCss; document.body.style.background = bgCss; }
+
+  // sun (day) fading into moon (space) — position by theme
+  const sunX = GAME_W - 105, sunY = 138 + camY * 0.06;
+  if (e < 0.75) {
+    const a = (1 - e / 0.75);
+    const g = ctx.createRadialGradient(sunX, sunY, 4, sunX, sunY, 90);
+    g.addColorStop(0, `rgba(255,244,200,${(0.95 * a).toFixed(3)})`);
+    g.addColorStop(0.25, `rgba(255,230,150,${(0.55 * a).toFixed(3)})`);
+    g.addColorStop(1, 'rgba(255,220,120,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(sunX, sunY, 90, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = `rgba(255,250,225,${(0.9 * a).toFixed(3)})`;
+    ctx.beginPath(); ctx.arc(sunX, sunY, 26, 0, Math.PI * 2); ctx.fill();
+  }
+  if (e > 0.45) {
+    const a = Math.min(1, (e - 0.45) / 0.4);
+    const mx = 96, my = 150 + camY * 0.04;
+    ctx.fillStyle = `rgba(226,232,245,${(0.92 * a).toFixed(3)})`;
+    ctx.beginPath(); ctx.arc(mx, my, 30, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = `rgba(200,208,226,${(0.35 * a).toFixed(3)})`;
+    ctx.beginPath(); ctx.arc(mx - 9, my - 4, 5.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(mx + 7, my + 9, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(mx + 11, my - 10, 3, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // stars grow in from level ~35 upward
+  if (level > 32) {
+    const alpha = Math.min(1, (level - 32) / 32);
+    for (const s of stars) {
+      const sy = ((s.y + camY * 0.35) % (GAME_H + 40)) - 20;
+      const tw = 0.75 + 0.25 * Math.sin(windT * 2.2 + s.x);
+      ctx.fillStyle = `rgba(255,255,255,${(s.a * alpha * tw).toFixed(3)})`;
+      ctx.beginPath(); ctx.arc(s.x, sy, s.r, 0, Math.PI * 2); ctx.fill();
+    }
+    // a few bigger cross-glint stars in deep space
+    if (alpha > 0.6) {
+      ctx.strokeStyle = `rgba(255,255,255,${(0.5 * alpha).toFixed(3)})`;
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 4; i++) {
+        const gx2 = (i * 137 + 60) % GAME_W, gy2 = ((i * 271 + camY * 0.35) % GAME_H);
+        ctx.beginPath();
+        ctx.moveTo(gx2 - 7, gy2); ctx.lineTo(gx2 + 7, gy2);
+        ctx.moveTo(gx2, gy2 - 7); ctx.lineTo(gx2, gy2 + 7);
+        ctx.stroke();
+      }
+    }
+  }
+
+  // distant city skyline near the ground (parallax, fades with height)
+  const groundA = Math.max(0, 1 - level / 18);
+  if (groundA > 0) {
+    const baseY = GAME_H - 40 + camY * 0.85;
+    ctx.fillStyle = `rgba(30,40,70,${(0.5 * groundA).toFixed(3)})`;
+    for (let i = 0; i < 12; i++) {
+      const bw = 34 + (i * 53) % 40;
+      const bh2 = 60 + (i * 97) % 130;
+      const bx = (i * 61) % (GAME_W + 60) - 30;
+      ctx.fillRect(bx, baseY - bh2, bw, bh2 + 60);
+      // lit windows in the silhouette
+      ctx.fillStyle = `rgba(255,230,140,${(0.35 * groundA).toFixed(3)})`;
+      for (let wy2 = baseY - bh2 + 10; wy2 < baseY - 8; wy2 += 20) {
+        for (let wx2 = bx + 6; wx2 < bx + bw - 8; wx2 += 14) {
+          if (((wx2 * 7 + wy2 * 13) | 0) % 3 === 0) ctx.fillRect(wx2, wy2, 5, 7);
+        }
+      }
+      ctx.fillStyle = `rgba(30,40,70,${(0.5 * groundA).toFixed(3)})`;
+    }
+  }
+
+  // volumetric cloud layers (3 parallax depths), fade above the cloud band
+  const cloudA = Math.max(0, 1 - Math.max(0, level - 8) / 46);
+  if (cloudA > 0) {
+    for (let layer = 0; layer < 3; layer++) {
+      const depth = 0.3 + layer * 0.28;
+      const drift = windT * (6 + layer * 5);
+      ctx.fillStyle = `rgba(255,255,255,${(0.14 + layer * 0.11) * cloudA})`;
+      for (let i = 0; i < 4; i++) {
+        const seed = i * 191 + layer * 631;
+        const cy2 = ((seed % 900) + camY * depth) % (GAME_H + 260) - 130;
+        const cx2 = ((seed * 7 % (GAME_W + 300)) + drift) % (GAME_W + 300) - 150;
+        const sc = 0.7 + layer * 0.35;
+        ctx.beginPath();
+        ctx.ellipse(cx2, cy2, 78 * sc, 24 * sc, 0, 0, Math.PI * 2);
+        ctx.ellipse(cx2 + 52 * sc, cy2 + 9 * sc, 55 * sc, 19 * sc, 0, 0, Math.PI * 2);
+        ctx.ellipse(cx2 - 48 * sc, cy2 + 11 * sc, 44 * sc, 15 * sc, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  // flyers: birds / planes / satellites
+  for (const f of flyers) {
+    const dir = f.vx > 0 ? 1 : -1;
+    if (f.kind === 'bird') {
+      ctx.strokeStyle = 'rgba(40,45,60,0.8)';
+      ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+      const wingY = Math.sin(f.flap) * 6;
+      ctx.beginPath();
+      ctx.moveTo(f.x - 10, f.y - wingY); ctx.quadraticCurveTo(f.x, f.y + 3, f.x + 10, f.y - wingY);
+      ctx.stroke();
+    } else if (f.kind === 'plane') {
+      ctx.save();
+      ctx.translate(f.x, f.y); ctx.scale(dir, 1);
+      ctx.fillStyle = 'rgba(235,240,250,0.92)';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 20, 5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-4, 0); ctx.lineTo(-14, -10); ctx.lineTo(-8, 0); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(2, 0); ctx.lineTo(-6, 9); ctx.lineTo(-2, 0); ctx.fill();
+      // contrail
+      const tr = ctx.createLinearGradient(-90, 0, -18, 0);
+      tr.addColorStop(0, 'rgba(255,255,255,0)'); tr.addColorStop(1, 'rgba(255,255,255,0.35)');
+      ctx.fillStyle = tr; ctx.fillRect(-90, -2, 72, 4);
+      ctx.restore();
+    } else {
+      // satellite: body + panels, subtle blink
+      ctx.save();
+      ctx.translate(f.x, f.y); ctx.rotate(0.35 * dir);
+      ctx.fillStyle = 'rgba(200,210,230,0.9)';
+      ctx.fillRect(-5, -5, 10, 10);
+      ctx.fillStyle = 'rgba(90,130,220,0.85)';
+      ctx.fillRect(-24, -3, 15, 6); ctx.fillRect(9, -3, 15, 6);
+      if (Math.sin(f.flap * 1.5) > 0.7) {
+        ctx.fillStyle = 'rgba(255,90,90,0.9)';
+        ctx.beginPath(); ctx.arc(0, -8, 2, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+}
+
+// 2.5D architectural block: side face, roof edge, windows with warm light,
+// cornice, drop shadow onto the block below, golden edge while perfectT > 0.
+const SIDE = 12;                       // 2.5D side depth (px)
+function swayFor(lv) {
+  // tower sways in the wind more with altitude; whole column shares phase
+  const amp = Math.min(6, Math.max(0, level - 12) * 0.12);
+  return Math.sin(windT * 1.4 + lv * 0.22) * amp * Math.min(1, lv / Math.max(1, level || 1));
+}
+
+function drawBlock(cx, y, w, hue, glow, lv, perfectT) {
   const x = cx - w / 2;
   const sat = theme().sat;
+  const spaceT = Math.min(1, Math.max(0, level - 40) / 40); // dim lighting in space
+  const lightMain = 60 - spaceT * 8, lightDark = 42 - spaceT * 8;
+
+  // drop shadow cast onto the block below
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.beginPath();
+  ctx.moveTo(x + 3, y + BH); ctx.lineTo(x + w + SIDE - 2, y + BH);
+  ctx.lineTo(x + w + SIDE - 6, y + BH + 7); ctx.lineTo(x + 6, y + BH + 7);
+  ctx.closePath(); ctx.fill();
+
+  // side face (right) — darker for 2.5D depth
+  ctx.fillStyle = `hsl(${hue},${sat}%,${lightDark - 14}%)`;
+  ctx.beginPath();
+  ctx.moveTo(x + w, y); ctx.lineTo(x + w + SIDE, y - SIDE * 0.5);
+  ctx.lineTo(x + w + SIDE, y + BH - SIDE * 0.5); ctx.lineTo(x + w, y + BH);
+  ctx.closePath(); ctx.fill();
+
+  // top face (roof) — lighter slab
+  ctx.fillStyle = `hsl(${hue},${Math.max(20, sat - 10)}%,${lightMain + 14}%)`;
+  ctx.beginPath();
+  ctx.moveTo(x, y); ctx.lineTo(x + SIDE, y - SIDE * 0.5);
+  ctx.lineTo(x + w + SIDE, y - SIDE * 0.5); ctx.lineTo(x + w, y);
+  ctx.closePath(); ctx.fill();
+
+  // front face gradient
   const grad = ctx.createLinearGradient(x, y, x, y + BH);
-  grad.addColorStop(0, `hsl(${hue},${sat}%,62%)`);
-  grad.addColorStop(1, `hsl(${hue},${sat}%,44%)`);
+  grad.addColorStop(0, `hsl(${hue},${sat}%,${lightMain}%)`);
+  grad.addColorStop(1, `hsl(${hue},${sat}%,${lightDark}%)`);
   ctx.fillStyle = grad;
   ctx.fillRect(x, y, w, BH);
-  ctx.fillStyle = 'rgba(255,255,255,0.22)';
-  ctx.fillRect(x, y, w, 5);
-  ctx.fillStyle = 'rgba(0,0,0,0.18)';
-  ctx.fillRect(x, y + BH - 5, w, 5);
+
+  // cornice band at the top of the front face
+  ctx.fillStyle = `hsla(${hue},${sat}%,${lightMain + 20}%,0.9)`;
+  ctx.fillRect(x, y, w, 4);
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.fillRect(x, y + 4, w, 2);
+
+  // windows with warm interior light — deterministic per level
+  const winW = 9, winH = 13, gapX = 17, startX = x + 9, winY = y + 12;
+  const spaceGlow = 0.55 + spaceT * 0.4;   // windows glow brighter in the dark
+  for (let wx2 = startX; wx2 <= x + w - winW - 6; wx2 += gapX) {
+    const litSeed = ((wx2 * 13 + (lv || 0) * 29) | 0) % 5;
+    if (litSeed < 3) {
+      ctx.fillStyle = `rgba(255,224,130,${spaceGlow.toFixed(2)})`;
+      ctx.fillRect(wx2, winY, winW, winH);
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.fillRect(wx2 + 1, winY + 1, winW - 2, 3);
+    } else {
+      ctx.fillStyle = 'rgba(20,26,46,0.55)';
+      ctx.fillRect(wx2, winY, winW, winH);
+      ctx.fillStyle = 'rgba(160,200,255,0.25)';
+      ctx.fillRect(wx2 + 1, winY + 1, winW - 2, 4);
+    }
+    // window frame
+    ctx.strokeStyle = 'rgba(0,0,0,0.28)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(wx2 + 0.5, winY + 0.5, winW - 1, winH - 1);
+  }
+
+  // base ledge
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.fillRect(x, y + BH - 4, w, 4);
+
+  // golden flash on perfect placement
+  if (perfectT > 0) {
+    const a = Math.min(1, perfectT / 0.6);
+    ctx.strokeStyle = `rgba(255,215,90,${a.toFixed(2)})`;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(x - 1, y - 1, w + 2, BH + 2);
+    ctx.fillStyle = `rgba(255,232,140,${(a * 0.25).toFixed(3)})`;
+    ctx.fillRect(x, y, w, BH);
+  }
+
   if (glow) {
-    ctx.strokeStyle = magnetT > 0 ? 'rgba(255,210,120,0.85)' : 'rgba(255,255,255,0.5)';
+    ctx.strokeStyle = magnetT > 0 ? 'rgba(255,210,120,0.9)' : 'rgba(255,255,255,0.65)';
     ctx.lineWidth = 2;
     ctx.strokeRect(x + 1, y + 1, w - 2, BH - 2);
   }
+}
+
+// crane cable + hook above the moving block
+function drawCrane(mx, my, w) {
+  const topY = -20;
+  const recoil = ropePulse > 0 ? Math.sin(ropePulse * 40) * 4 * ropePulse : 0;
+  ctx.strokeStyle = 'rgba(40,44,60,0.75)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(mx + recoil, topY);
+  ctx.lineTo(mx, my - 10);
+  ctx.stroke();
+  // hook plate
+  ctx.fillStyle = 'rgba(50,55,75,0.9)';
+  ctx.fillRect(mx - 14, my - 10, 28, 6);
+  ctx.beginPath(); ctx.arc(mx, my - 12, 4, 0, Math.PI * 2); ctx.fill();
+  // side cables to block edges
+  ctx.strokeStyle = 'rgba(40,44,60,0.55)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(mx - 12, my - 7); ctx.lineTo(mx - w / 2 + 6, my + 2);
+  ctx.moveTo(mx + 12, my - 7); ctx.lineTo(mx + w / 2 - 6, my + 2);
+  ctx.stroke();
 }
 
 function drawBtn(cx, cy, w, h, label, id, color, fontSize = 26) {
@@ -435,13 +709,61 @@ function drawBtn(cx, cy, w, h, label, id, color, fontSize = 26) {
   buttons.push({ x, y, w, h, id });
 }
 
+// soft cloud-style rounded panel
+function cloudPanel(x, y, w, h, alpha = 0.32) {
+  ctx.fillStyle = `rgba(16,22,44,${alpha})`;
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, 18); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.roundRect(x + 1, y + 1, w - 2, h - 2, 17); ctx.stroke();
+  // soft top sheen
+  const sheen = ctx.createLinearGradient(0, y, 0, y + Math.min(26, h));
+  sheen.addColorStop(0, 'rgba(255,255,255,0.14)');
+  sheen.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = sheen;
+  ctx.beginPath(); ctx.roundRect(x, y, w, Math.min(26, h), 18); ctx.fill();
+}
+
 function cloudsHud(x, y) {
   ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-  ctx.fillStyle = 'rgba(0,0,0,0.28)';
-  ctx.beginPath(); ctx.roundRect(x - 8, y - 4, 116, 34, 10); ctx.fill();
+  cloudPanel(x - 8, y - 4, 116, 36, 0.38);
   ctx.fillStyle = '#bfe3ff';
   ctx.font = '800 22px "Segoe UI", Arial, sans-serif';
-  ctx.fillText('☁ ' + save.clouds, x, y);
+  ctx.fillText('☁ ' + save.clouds, x + 4, y + 2);
+}
+
+// altimeter-style floor gauge on the right edge
+function drawAltimeter() {
+  const ax = GAME_W - 52, ay = 190, ah = 300;
+  ctx.save();
+  cloudPanel(ax - 26, ay - 14, 62, ah + 48, 0.22);
+  // tick marks scrolling with height
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  ctx.font = '700 13px "Segoe UI", Arial, sans-serif';
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  const pxPerFloor = 14;
+  for (let f2 = Math.max(0, level - 9); f2 <= level + 12; f2++) {
+    const yy = ay + ah / 2 - (f2 - level) * pxPerFloor - (targetCamY - camY) * 0.04;
+    if (yy < ay - 4 || yy > ay + ah + 4) continue;
+    const major = f2 % 5 === 0;
+    ctx.lineWidth = major ? 2 : 1;
+    ctx.beginPath();
+    ctx.moveTo(ax + 20, yy); ctx.lineTo(ax + (major ? 4 : 12), yy);
+    ctx.stroke();
+    if (major && f2 >= 0) ctx.fillText(String(f2), ax + 1, yy);
+  }
+  // needle at current floor
+  ctx.fillStyle = '#ffe86b';
+  ctx.beginPath();
+  ctx.moveTo(ax + 24, ay + ah / 2);
+  ctx.lineTo(ax + 14, ay + ah / 2 - 6);
+  ctx.lineTo(ax + 14, ay + ah / 2 + 6);
+  ctx.closePath(); ctx.fill();
+  ctx.font = '900 17px "Segoe UI", Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('FL', ax - 2, ay - 2);
+  ctx.restore();
 }
 
 function worldToScreen(wy) { return wy + camY; }
@@ -451,48 +773,44 @@ function draw() {
   ctx.save();
   if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
 
-  const [cTop, cBot] = skyColors(level);
-  const bg = ctx.createLinearGradient(0, 0, 0, GAME_H);
-  bg.addColorStop(0, cTop); bg.addColorStop(1, cBot);
-  ctx.fillStyle = bg;
-  ctx.fillRect(-20, -20, GAME_W + 40, GAME_H + 40);
+  drawSky();
 
-  // stars above level 40
-  if (level > 40) {
-    const alpha = Math.min(1, (level - 40) / 30);
-    for (const s of stars) {
-      const sy = ((s.y + camY * 0.35) % (GAME_H + 40)) - 20;
-      ctx.fillStyle = `rgba(255,255,255,${(s.a * alpha).toFixed(3)})`;
-      ctx.beginPath(); ctx.arc(s.x, sy, s.r, 0, Math.PI * 2); ctx.fill();
+  // solid ground strip under the base block (anchors the tower)
+  {
+    const gy2 = worldToScreen(BASE_Y + BH);
+    if (gy2 < GAME_H + 20) {
+      const gg = ctx.createLinearGradient(0, gy2, 0, GAME_H + 20);
+      gg.addColorStop(0, 'rgba(46,58,86,0.95)');
+      gg.addColorStop(1, 'rgba(24,30,48,0.98)');
+      ctx.fillStyle = gg;
+      ctx.fillRect(-20, gy2, GAME_W + 40, GAME_H + 40 - gy2);
+      // sidewalk edge
+      ctx.fillStyle = 'rgba(200,210,230,0.35)';
+      ctx.fillRect(-20, gy2, GAME_W + 40, 3);
+      // road dashes
+      ctx.fillStyle = 'rgba(255,220,120,0.3)';
+      for (let dx2 = 10; dx2 < GAME_W; dx2 += 60) ctx.fillRect(dx2, gy2 + 22, 26, 3);
     }
   }
 
-  // clouds (simple, parallax, fade out with height)
-  const cloudA = Math.max(0, 1 - level / 55);
-  if (cloudA > 0) {
-    ctx.fillStyle = `rgba(255,255,255,${(0.35 * cloudA).toFixed(3)})`;
-    for (let i = 0; i < 5; i++) {
-      const cy2 = ((i * 233 + camY * 0.5) % (GAME_H + 200)) - 100;
-      const cx2 = (i * 197) % GAME_W;
-      ctx.beginPath();
-      ctx.ellipse(cx2, cy2, 70, 22, 0, 0, Math.PI * 2);
-      ctx.ellipse(cx2 + 45, cy2 + 8, 50, 18, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  // tower
+  // tower — with wind sway that grows with altitude
   for (const b of blocks) {
     const sy = worldToScreen(levelY(b.level));
-    if (sy > -BH && sy < GAME_H + BH) drawBlock(b.cx, sy, b.w, b.hue, false);
+    if (sy > -BH - 12 && sy < GAME_H + BH) {
+      drawBlock(b.cx + swayFor(b.level), sy, b.w, b.hue, false, b.level, b.perfectT || 0);
+    }
   }
 
-  // moving block
+  // moving block + crane cable
   if (moving && state === 'playing') {
-    drawBlock(moving.cx, worldToScreen(moving.y), moving.w, moving.hue, true);
+    const my = worldToScreen(moving.y);
+    drawCrane(moving.cx, my, moving.w);
+    drawBlock(moving.cx, my, moving.w, moving.hue, true, moving.level, 0);
+  } else if (ropePulse > 0 && state === 'playing') {
+    drawCrane(lastDropX, -30, 40);
   }
 
-  // debris
+  // debris — fading cut pieces with window detail
   for (const d of debris) {
     ctx.save();
     ctx.translate(d.x, worldToScreen(d.y) + BH / 2);
@@ -500,6 +818,10 @@ function draw() {
     ctx.globalAlpha = Math.min(1, d.life);
     ctx.fillStyle = `hsl(${d.hue},70%,50%)`;
     ctx.fillRect(-d.w / 2, -d.h / 2, d.w, d.h);
+    ctx.fillStyle = 'rgba(255,224,130,0.5)';
+    for (let wx2 = -d.w / 2 + 5; wx2 < d.w / 2 - 9; wx2 += 17) ctx.fillRect(wx2, -d.h / 2 + 10, 8, 12);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(-d.w / 2, d.h / 2 - 4, d.w, 4);
     ctx.restore();
   }
 
@@ -510,15 +832,27 @@ function draw() {
     ctx.beginPath(); ctx.arc(p.x, worldToScreen(p.y), 3.5 * a + 1, 0, Math.PI * 2); ctx.fill();
   }
 
-  // floaters
+  // floaters — pop-in scale animation
   for (const f of floaters) {
     const a = 1 - f.t / f.life;
+    const pop = f.t < 0.14 ? 0.5 + (f.t / 0.14) * 0.62 : 1.12 - Math.min(0.12, (f.t - 0.14) * 0.8);
+    ctx.save();
     ctx.globalAlpha = a;
-    ctx.fillStyle = f.color;
+    ctx.translate(f.x, worldToScreen(f.y));
+    ctx.scale(pop, pop);
     ctx.font = `900 ${f.size}px "Segoe UI", Arial, sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(f.text, f.x, worldToScreen(f.y));
-    ctx.globalAlpha = 1;
+    ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(20,16,4,0.55)';
+    ctx.strokeText(f.text, 0, 0);
+    ctx.fillStyle = f.color;
+    ctx.fillText(f.text, 0, 0);
+    ctx.restore();
+  }
+
+  // perfect flash — quick warm full-screen glow
+  if (flashT > 0) {
+    ctx.fillStyle = `rgba(255,240,190,${(flashT / 0.18 * 0.22).toFixed(3)})`;
+    ctx.fillRect(-20, -20, GAME_W + 40, GAME_H + 40);
   }
 
   // HUD
@@ -536,6 +870,7 @@ function draw() {
       ctx.fillText('PERFECT x' + perfectCombo, GAME_W / 2, 122);
     }
     cloudsHud(16, 20);
+    if (state === 'playing') drawAltimeter();
   }
 
   // in-run power-up buttons + active timers
@@ -586,8 +921,7 @@ function draw() {
 
     // daily missions panel
     ensureDaily();
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.beginPath(); ctx.roundRect(50, 680, GAME_W - 100, 190, 14); ctx.fill();
+    cloudPanel(50, 680, GAME_W - 100, 190, 0.34);
     ctx.fillStyle = '#ffe86b';
     ctx.font = '800 22px "Segoe UI", Arial, sans-serif';
     ctx.fillText('DAILY MISSIONS', GAME_W / 2, 696);
@@ -696,8 +1030,7 @@ function draw() {
   for (const t of toasts) {
     const a = t.t < 0.25 ? t.t / 0.25 : t.t > t.life - 0.4 ? (t.life - t.t) / 0.4 : 1;
     ctx.globalAlpha = Math.max(0, a);
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.beginPath(); ctx.roundRect(GAME_W / 2 - 190, ty, 380, t.sub ? 66 : 44, 12); ctx.fill();
+    cloudPanel(GAME_W / 2 - 190, ty, 380, t.sub ? 66 : 44, 0.55);
     ctx.fillStyle = '#ffe86b';
     ctx.font = '800 24px "Segoe UI", Arial, sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'top';
