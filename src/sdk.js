@@ -49,7 +49,13 @@ export function happytime() {
 // Returns a promise resolving to true if the ad finished (grant reward), false otherwise.
 export function requestAd(type, { onStart, onFinish } = {}) {
   return new Promise((resolve) => {
-    if (!sdk) { resolve(type !== 'rewarded'); return; } // local dev: midgame "succeeds", rewarded fails
+    if (!sdk) {
+      // Keep local runs on the same lifecycle path as a real SDK ad.
+      if (onStart) onStart();
+      if (onFinish) onFinish();
+      resolve(type !== 'rewarded');
+      return;
+    }
     const callbacks = {
       adStarted: () => { if (onStart) onStart(); },
       adFinished: () => { if (onFinish) onFinish(); resolve(true); },

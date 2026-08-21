@@ -3,6 +3,7 @@ import { initSDK, getSDK, loadingStart, loadingStop, gameplayStart, gameplayStop
 import { setMuted, unlockAudio, cutSound, perfectSound, growSound, gameOverSound, clickSound, coinSound, milestoneSound, setMusicOn, getMusicOn } from './audio.js';
 import { bindSDK } from './save.js';
 import { initMeta, persistNow, save, THEMES, themeById, buyTheme, WIDE_COSTS, wideBonus, buyWide, POWERUPS, buyPowerup, ensureDaily, missionProgress, checkStreak, difficultyFactor } from './meta.js';
+import { FIXED_STEP, clampFrameDelta, advanceMoving, simulateTiming } from './simulation.js';
 
 const GAME_W = 540, GAME_H = 960;
 const BASE_W = 260, BH = 36;          // base block width, block height
@@ -10,6 +11,7 @@ const MIN_W = 8;                       // narrower than this = game over
 const PERFECT_FRAC = 0.98;             // overlap >= 98% of moving block = perfect
 const MAGNET_FRAC = 0.90;              // perfect window while magnet is active
 const BASE_Y = 880;                    // world y of top of base block
+const MAX_DEBRIS = 36, MAX_PARTICLES = 180, MAX_FLOATERS = 20, MAX_TOASTS = 4, MAX_FLYERS = 12;
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -64,6 +66,12 @@ let flyerTimer = 4;
 let ropePulse = 0;         // crane cable recoil after release
 let lastDropX = GAME_W / 2;
 let lastBodyBg = '';
+let guideT = 1;                        // landing guide fades after the first PERFECT
+let firstPerfect = false;
+let paused = false;
+let pauseReasons = new Set();
+let accumulator = 0;
+let reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 for (let i = 0; i < 120; i++) {
   stars.push({ x: Math.random() * GAME_W, y: Math.random() * 4000, r: Math.random() * 1.6 + 0.4, a: 0.3 + Math.random() * 0.6 });
@@ -79,6 +87,7 @@ function blockSpeed(lv) {
 
 function toast(text, sub) {
   toasts.push({ text, sub: sub || '', life: 2.4, t: 0 });
+  if (toasts.length > MAX_TOASTS) toasts.splice(0, toasts.length - MAX_TOASTS);
 }
 
 function earnClouds(n, x, y) {
@@ -96,6 +105,7 @@ function resetGame() {
   usedContinue = false; doubledClouds = false;
   slowmoT = 0; magnetT = 0;
   camY = 0; targetCamY = 0; shake = 0; hitStop = 0;
+  guideT = firstPerfect ? 0 : 1;
   spawnMoving();
 }
 
@@ -120,13 +130,20 @@ function spawnMoving(widthOverride) {
 
 // ---------- particles / feel ----------
 function burst(x, y, hue, n, spd) {
-  for (let i = 0; i < n; i++) {
+  const available = Math.max(0, MAX_PARTICLES - particles.length);
+  for (let i = 0; i < Math.min(n, available); i++) {
     const a = Math.random() * Math.PI * 2, v = (0.3 + Math.random() * 0.7) * spd;
     particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 60, life: 0.7 + Math.random() * 0.4, t: 0, hue });
   }
 }
 function floatText(x, y, text, color, size = 26) {
   floaters.push({ x, y, text, life: 1.1, t: 0, color, size });
+  if (floaters.length > MAX_FLOATERS) floaters.splice(0, floaters.length - MAX_FLOATERS);
+}
+
+function addDebris(piece) {
+  debris.push(piece);
+  if (debris.length > MAX_DEBRIS) debris.splice(0, debris.length - MAX_DEBRIS);
 }
 
 // ---------- gameplay ----------
@@ -163,7 +180,7 @@ function doDrop() {
   lastDropX = moving.cx;
 
   if (overlap < MIN_W) { // complete miss or sliver → whole block falls, game over
-    debris.push({ x: moving.cx, y, w: moving.w, h: BH, vx: moving.dir * 60, vy: -40, rot: 0, vr: (Math.random() - 0.5) * 4, hue: moving.hue, life: 2 });
+    addDebris({ x: moving.cx, y, w: moving.w, h: BH, vx: moving.dir * 60, vy: -40, rot: 0, vr: (Math.random() - 0.5) * 4, hue: moving.hue, life: 2 });
     moving = null;
     triggerGameOver();
     return;
@@ -171,12 +188,13 @@ function doDrop() {
 
   // The opening is deliberately friendly: newcomers get three broad perfect
   // windows before the normal timing challenge takes over.
-  const frac = level <= 3 ? 0.86 : (magnetT > 0 ? MAGNET_FRAC : PERFECT_FRAC);
+  const frac = level < 3 ? 0.86 : (magnetT > 0 ? MAGNET_FRAC : PERFECT_FRAC);
   const isPerfect = overlap >= frac * moving.w;
   let placed;
   if (isPerfect) {
     perfectCombo++;
     perfectsRun++;
+    firstPerfect = true;
     let w = moving.w;
     let grew = false;
     if (perfectCombo >= 3 && w < runBaseW) { w = Math.min(runBaseW, w + 10); grew = true; }
@@ -198,11 +216,11 @@ function doDrop() {
     // cut piece(s)
     if (curL < prevL) {
       const cw = prevL - curL;
-      debris.push({ x: curL + cw / 2, y, w: cw, h: BH, vx: -60 - Math.random() * 60, vy: -30, rot: 0, vr: -2 - Math.random() * 2, hue: moving.hue, life: 2 });
+      addDebris({ x: curL + cw / 2, y, w: cw, h: BH, vx: -60 - Math.random() * 60, vy: -30, rot: 0, vr: -2 - Math.random() * 2, hue: moving.hue, life: 2 });
     }
     if (curR > prevR) {
       const cw = curR - prevR;
-      debris.push({ x: prevR + cw / 2, y, w: cw, h: BH, vx: 60 + Math.random() * 60, vy: -30, rot: 0, vr: 2 + Math.random() * 2, hue: moving.hue, life: 2 });
+      addDebris({ x: prevR + cw / 2, y, w: cw, h: BH, vx: 60 + Math.random() * 60, vy: -30, rot: 0, vr: 2 + Math.random() * 2, hue: moving.hue, life: 2 });
     }
     placed = { cx: newCx, w: newW, level: moving.level, hue: moving.hue };
     score += 1;
@@ -216,16 +234,17 @@ function doDrop() {
   moving = null;
   save.blocksTotal++;
   save.daily.blocksToday = (save.daily.blocksToday || 0) + 1;
-  if (!save.hintDone && level >= 3) { save.hintDone = true; persistNow(); }
+  if (firstPerfect && !save.hintDone) { save.hintDone = true; persistNow(); }
 
-  // height milestones every 25 floors: clouds reward + fanfare
-  if (level % 25 === 0 && level > 0) {
-    const reward = level; // 25, 50, 75...
+  // A visible district/reward beat every 10 floors prevents an endless plateau.
+  if (level % 10 === 0 && level > 0) {
+    const major = level % 25 === 0;
+    const reward = major ? level : 5 + Math.floor(level / 10) * 2;
     earnClouds(reward, placed.cx, y - 100);
     milestoneSound();
     happytime();
-    toast('FLOOR ' + level + '!', '+' + reward + ' ☁ milestone');
-    shake = Math.max(shake, 6);
+    toast(major ? 'LANDMARK FLOOR ' + level + '!' : 'DISTRICT UNLOCKED!', '+' + reward + ' ☁  ·  ' + districtName(level));
+    shake = Math.max(shake, reducedMotion ? 1.5 : major ? 6 : 3);
   }
 
   checkMissions(placed.cx, y);
@@ -255,8 +274,8 @@ async function playAgain() {
     lastAdT = now;
     state = 'ad';
     await requestAd('midgame', {
-      onStart: () => setMuted(true),
-      onFinish: () => setMuted(getMuteSetting()),
+      onStart: pauseForAd,
+      onFinish: resumeFromAd,
     });
   }
   startGame();
@@ -265,8 +284,8 @@ async function playAgain() {
 async function doContinue() {
   state = 'ad';
   const ok = await requestAd('rewarded', {
-    onStart: () => setMuted(true),
-    onFinish: () => setMuted(getMuteSetting()),
+    onStart: pauseForAd,
+    onFinish: resumeFromAd,
   });
   if (ok) {
     usedContinue = true;
@@ -282,8 +301,8 @@ async function doContinue() {
 async function doDoubleClouds() {
   state = 'ad';
   const ok = await requestAd('rewarded', {
-    onStart: () => setMuted(true),
-    onFinish: () => setMuted(getMuteSetting()),
+    onStart: pauseForAd,
+    onFinish: resumeFromAd,
   });
   if (ok && cloudsRun > 0) {
     save.clouds += cloudsRun;
@@ -349,7 +368,26 @@ function handleButton(id) {
   }
 }
 
+function setPaused(reason, shouldPause) {
+  if (shouldPause) pauseReasons.add(reason); else pauseReasons.delete(reason);
+  const next = pauseReasons.size > 0;
+  if (next === paused) return;
+  paused = next;
+  if (paused) {
+    if (state === 'playing') gameplayStop();
+    setMusicOn(false);
+  } else {
+    if (save && save.musicOn) setMusicOn(true);
+    if (state === 'playing') gameplayStart();
+  }
+}
+
+function pauseForAd() { gameplayStop(); setMuted(true); setPaused('ad', true); }
+function resumeFromAd() { setMuted(getMuteSetting()); setPaused('ad', false); }
+
 canvas.addEventListener('pointerdown', (e) => {
+  if (e.pointerType === 'touch') e.preventDefault();
+  if (paused) return;
   unlockAudio();
   if (save && save.musicOn && !getMusicOn()) setMusicOn(true);
   const p = gameCoords(e);
@@ -366,6 +404,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Space' || e.code === 'Enter') {
     unlockAudio();
     if (save && save.musicOn && !getMusicOn()) setMusicOn(true);
+    if (paused) return;
     if (state === 'playing') doDrop();
     else if (state === 'menu') startGame();
     else if (state === 'gameover') playAgain();
@@ -381,10 +420,12 @@ window.addEventListener('keydown', (e) => {
 // ---------- update ----------
 let persistAcc = 0;
 function update(dt) {
+  if (paused) return;
   windT += dt;
   camY += (targetCamY - camY) * Math.min(1, dt * 5);
   if (shake > 0) shake = Math.max(0, shake - dt * 30);
   if (flashT > 0) flashT = Math.max(0, flashT - dt);
+  if (firstPerfect && guideT > 0) guideT = Math.max(0, guideT - dt / 1.2);
   if (ropePulse > 0) ropePulse = Math.max(0, ropePulse - dt);
   // fade perfect glow on recent blocks
   for (let i = Math.max(0, blocks.length - 5); i < blocks.length; i++) {
@@ -416,20 +457,14 @@ function update(dt) {
     if (persistAcc > 15) { persistAcc = 0; persistNow(); }
   }
 
-  if (state === 'playing' && moving) {
-    const spd = moving.speed * (slowmoT > 0 ? 0.45 : 1);
-    moving.cx += moving.dir * spd * dt;
-    const half = moving.w / 2, margin = 40;
-    if (moving.cx - half < -margin) { moving.cx = -margin + half; moving.dir = 1; }
-    if (moving.cx + half > GAME_W + margin) { moving.cx = GAME_W + margin - half; moving.dir = -1; }
-  }
+  if (state === 'playing' && moving) advanceMoving(moving, dt, slowmoT > 0, GAME_W);
 
   for (const d of debris) {
     d.vy += 900 * dt;
     d.x += d.vx * dt; d.y += d.vy * dt; d.rot += d.vr * dt;
     d.life -= dt;
   }
-  debris = debris.filter(d => d.life > 0);
+  debris = debris.filter(d => d.life > 0 && d.y < BASE_Y + 900 && d.x > -900 && d.x < GAME_W + 900);
 
   for (const p of particles) {
     p.t += dt; p.vy += 500 * dt;
@@ -603,10 +638,42 @@ function drawSky() {
 // 2.5D architectural block: side face, roof edge, windows with warm light,
 // cornice, drop shadow onto the block below, golden edge while perfectT > 0.
 const SIDE = 12;                       // 2.5D side depth (px)
+function districtName(lv) {
+  if (lv < 10) return 'STREET WORKS';
+  if (lv < 25) return 'CLOUD DISTRICT';
+  if (lv < 50) return 'JETSTREAM';
+  if (lv < 75) return 'ORBITAL NIGHT';
+  return 'STAR CROWN';
+}
+
+function towerRisk() {
+  const top = blocks[blocks.length - 1];
+  const narrow = top ? Math.max(0, 1 - top.w / runBaseW) : 0;
+  const altitude = Math.min(1, level / 70);
+  return Math.min(1, narrow * 0.68 + altitude * 0.42);
+}
+
+function windDirection() {
+  return Math.sin(windT * 0.19 + level * 0.11) >= 0 ? 1 : -1;
+}
+
 function swayFor(lv) {
-  // tower sways in the wind more with altitude; whole column shares phase
-  const amp = Math.min(6, Math.max(0, level - 12) * 0.12);
-  return Math.sin(windT * 1.4 + lv * 0.22) * amp * Math.min(1, lv / Math.max(1, level || 1));
+  // Narrow, high towers visibly answer the wind without changing the input loop.
+  const amp = reducedMotion ? 0.8 : 1.6 + towerRisk() * 7;
+  return windDirection() * Math.sin(windT * 1.4 + lv * 0.12) * amp * Math.min(1, lv / Math.max(1, level || 1));
+}
+
+function drawWindRisk() {
+  if (state !== 'playing') return;
+  const risk = towerRisk(), dir = windDirection();
+  const x = 24, y = 132;
+  cloudPanel(x - 10, y - 8, 160, 60, 0.30);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.font = '800 14px "Segoe UI", Arial, sans-serif';
+  ctx.fillStyle = risk > 0.62 ? '#ffd27b' : '#dceeff';
+  ctx.fillText('WIND ' + (dir > 0 ? '→' : '←') + '  ' + (risk > 0.62 ? 'HIGH' : risk > 0.32 ? 'STEADY' : 'LIGHT'), x, y);
+  ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(x, y + 29, 126, 7);
+  ctx.fillStyle = risk > 0.62 ? '#ffb36b' : '#8fc9ff'; ctx.fillRect(x, y + 29, 126 * Math.max(0.12, risk), 7);
 }
 
 function drawBlock(cx, y, w, hue, glow, lv, perfectT) {
@@ -889,6 +956,33 @@ function drawDesktopUI() {
   }
 }
 
+function drawDesktopShop() {
+  if (state !== 'shop' || !isDesktopLayout()) return;
+  const panelW = 560, x = GAME_W / 2 - panelW / 2, y = 92;
+  cloudPanel(x, y, panelW, 730, 0.68);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.fillStyle = '#ffffff'; ctx.font = '900 42px "Segoe UI", Arial, sans-serif';
+  ctx.fillText('CLOUD SHOP', GAME_W / 2, y + 28);
+  ctx.fillStyle = '#bfe3ff'; ctx.font = '800 25px "Segoe UI", Arial, sans-serif';
+  ctx.fillText('☁ ' + save.clouds + '  ·  spend Clouds between climbs', GAME_W / 2, y + 86);
+  ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(x + 28, y + 126, panelW - 56, 1);
+  ctx.fillStyle = '#ffe86b'; ctx.font = '800 21px "Segoe UI", Arial, sans-serif';
+  ctx.fillText('THEMES', GAME_W / 2, y + 148);
+  THEMES.forEach((t, i) => {
+    const col = i % 3, row = Math.floor(i / 3), bx = GAME_W / 2 - 180 + col * 180, by = y + 225 + row * 88;
+    const owned = save.themesOwned.includes(t.id), equipped = save.theme === t.id;
+    ctx.fillStyle = `hsl(${t.hue(i * 9)},${t.sat}%,55%)`; ctx.fillRect(bx - 62, by - 32, 124, 12);
+    drawBtn(bx, by + 8, 156, 48, equipped ? '✓ ' + t.name : owned ? t.name : t.name + ' · ' + t.cost + '☁', 'theme-' + t.id, equipped ? '#7bffb0' : owned ? '#ffe86b' : 'rgba(255,255,255,0.88)', 16);
+  });
+  ctx.fillStyle = '#ffe86b'; ctx.font = '800 21px "Segoe UI", Arial, sans-serif';
+  ctx.fillText('UPGRADES', GAME_W / 2, y + 423);
+  const wide = save.wideLvl >= 3 ? 'WIDER BASE · MAX' : 'WIDER BASE Lv' + (save.wideLvl + 1) + ' · ' + WIDE_COSTS[save.wideLvl] + '☁';
+  drawBtn(GAME_W / 2, y + 480, 430, 56, wide, 'buy-wide', save.wideLvl >= 3 ? 'rgba(160,160,160,0.7)' : '#ffe86b', 20);
+  POWERUPS.forEach((p, i) => drawBtn(GAME_W / 2, y + 550 + i * 68, 430, 56, p.name + ' ×' + save[p.id] + ' · ' + p.cost + '☁', 'buy-' + p.id, i ? '#ffd29f' : '#9fd4ff', 20));
+  if (shopMsgT > 0 && shopMsg) { ctx.fillStyle = '#ffe86b'; ctx.font = '800 20px "Segoe UI", Arial, sans-serif'; ctx.fillText(shopMsg, GAME_W / 2, y + 654); }
+  drawBtn(GAME_W / 2, y + 692, 260, 56, '← BACK', 'back', 'rgba(255,255,255,0.9)', 21);
+}
+
 function worldToScreen(wy) { return wy + camY; }
 
 function draw() {
@@ -929,6 +1023,30 @@ function draw() {
   // moving block + crane cable
   if (moving && state === 'playing') {
     const my = worldToScreen(moving.y);
+    // Exact cut-off preview and first-run landing shadow: teaches timing in play.
+    const top = blocks[blocks.length - 1];
+    const guideAlpha = firstPerfect ? Math.max(0, guideT) : 0.82;
+    if (top && guideAlpha > 0.01) {
+      const targetY = worldToScreen(levelY(top.level + 1));
+      ctx.save();
+      ctx.globalAlpha = guideAlpha * (0.55 + 0.2 * Math.sin(windT * 5));
+      ctx.fillStyle = '#bfe3ff';
+      ctx.fillRect(top.cx - top.w / 2, targetY, top.w, BH);
+      ctx.setLineDash([7, 5]); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
+      ctx.strokeRect(top.cx - top.w / 2, targetY, top.w, BH);
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+    if (top) {
+      const l = Math.max(moving.cx - moving.w / 2, top.cx - top.w / 2);
+      const r = Math.min(moving.cx + moving.w / 2, top.cx + top.w / 2);
+      ctx.fillStyle = r > l ? 'rgba(123,255,176,0.24)' : 'rgba(255,110,110,0.22)';
+      ctx.fillRect(l, my + BH - 5, Math.max(0, r - l), 5);
+      ctx.strokeStyle = 'rgba(255,230,107,0.85)'; ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath(); ctx.moveTo(top.cx - top.w / 2, my + BH + 8); ctx.lineTo(top.cx - top.w / 2, my + BH + 24);
+      ctx.moveTo(top.cx + top.w / 2, my + BH + 8); ctx.lineTo(top.cx + top.w / 2, my + BH + 24); ctx.stroke(); ctx.setLineDash([]);
+    }
     drawCrane(moving.cx, my, moving.w);
     drawBlock(moving.cx, my, moving.w, moving.hue, true, moving.level, 0);
   } else if (ropePulse > 0 && state === 'playing') {
@@ -976,7 +1094,7 @@ function draw() {
 
   // perfect flash — quick warm full-screen glow
   if (flashT > 0) {
-    ctx.fillStyle = `rgba(255,240,190,${(flashT / 0.18 * 0.22).toFixed(3)})`;
+    ctx.fillStyle = `rgba(255,240,190,${(flashT / 0.18 * (reducedMotion ? 0.06 : 0.22)).toFixed(3)})`;
     ctx.fillRect(-20, -20, GAME_W + 40, GAME_H + 40);
   }
 
@@ -996,6 +1114,7 @@ function draw() {
     }
     cloudsHud(16, 20);
     if (state === 'playing' && !isDesktopLayout()) drawAltimeter();
+    drawWindRisk();
   }
 
   // in-run power-up buttons + active timers
@@ -1008,14 +1127,14 @@ function draw() {
     if (magnetT > 0) { ctx.fillStyle = '#ffd29f'; ctx.fillText('🧲 ' + magnetT.toFixed(0) + 's', 16, slowmoT > 0 ? 84 : 60); }
 
     // contextual first-play hint
-    if (!save.hintDone && moving) {
+    if ((!save.hintDone || guideT > 0) && moving) {
       const top = blocks[blocks.length - 1];
       const aligned = Math.abs(moving.cx - top.cx) < top.w * 0.35;
       const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 180);
       ctx.textAlign = 'center';
       ctx.fillStyle = aligned ? `rgba(123,255,176,${pulse.toFixed(2)})` : 'rgba(255,255,255,0.85)';
       ctx.font = '800 28px "Segoe UI", Arial, sans-serif';
-      ctx.fillText(aligned ? 'TAP NOW!' : 'Watch the hook — tap when it lines up', GAME_W / 2, GAME_H - 140);
+      ctx.fillText(aligned ? 'TAP NOW!' : 'Match the landing shadow — tap to cut', GAME_W / 2, GAME_H - 140);
     }
   }
 
@@ -1070,7 +1189,7 @@ function draw() {
     }
   }
 
-  if (state === 'shop') {
+  if (state === 'shop' && !isDesktopLayout()) {
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
     ctx.fillRect(0, 0, GAME_W, GAME_H);
     ctx.fillStyle = '#ffffff';
@@ -1157,7 +1276,16 @@ function draw() {
     ctx.fillText('...', GAME_W / 2, GAME_H / 2);
   }
 
+  if (paused && state !== 'ad') {
+    ctx.fillStyle = 'rgba(7,11,24,0.42)';
+    ctx.fillRect(viewLeft - 20, viewTop - 20, viewW + 40, viewH + 40);
+    ctx.fillStyle = '#ffffff'; ctx.font = '800 30px "Segoe UI", Arial, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('PAUSED', GAME_W / 2, GAME_H / 2);
+  }
+
   drawDesktopUI();
+  drawDesktopShop();
 
   // toasts (screen space, top center)
   let ty = 170;
@@ -1183,9 +1311,13 @@ function draw() {
 
 // ---------- loop ----------
 function frame(t) {
-  const dt = Math.min(0.05, (t - tPrev) / 1000 || 0.016);
+  const dt = clampFrameDelta((t - tPrev) / 1000 || FIXED_STEP);
   tPrev = t;
-  update(dt);
+  accumulator = Math.min(0.25, accumulator + dt);
+  while (accumulator >= FIXED_STEP) {
+    update(FIXED_STEP);
+    accumulator -= FIXED_STEP;
+  }
   draw();
   requestAnimationFrame(frame);
 }
@@ -1204,6 +1336,11 @@ async function boot() {
   loadingStop();
   state = 'menu';
   window.addEventListener('beforeunload', () => persistNow());
+  document.addEventListener('visibilitychange', () => setPaused('visibility', document.hidden));
+  window.addEventListener('blur', () => setPaused('blur', true));
+  window.addEventListener('focus', () => setPaused('blur', false));
+  const motionQuery = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+  if (motionQuery) motionQuery.addEventListener('change', (event) => { reducedMotion = event.matches; });
 
   if (new URLSearchParams(location.search).get('debug') === '1') {
     window.__astro = {
@@ -1217,8 +1354,11 @@ async function boot() {
         slowmoT, magnetT, totalPlay: save.totalPlay,
         streak: save.streak.count, missions: save.daily.missions.map(m => ({ id: m.id, prog: m.prog, done: m.done })),
         runBaseW,
+        paused, guideT, risk: towerRisk(), counts: { debris: debris.length, particles: particles.length, floaters: floaters.length, toasts: toasts.length, flyers: flyers.length, listeners: 5, loops: 1 },
       }),
       addScore: (n) => { score += n; },
+      start: () => { if (state === 'menu') startGame(); },
+      restart: () => startGame(),
       getButtons: () => buttons.map(b => ({ id: b.id, x: b.x + b.w / 2, y: b.y + b.h / 2 })),
       grantClouds: (n) => { save.clouds += n; persistNow(); },
       buyTheme: (id) => buyTheme(id),
@@ -1226,8 +1366,13 @@ async function boot() {
       buyPowerup: (id) => buyPowerup(id),
       usePowerup: (id) => usePowerup(id),
       alignMoving: () => { if (state === 'playing' && moving && blocks.length) moving.cx = blocks[blocks.length - 1].cx; },
+      drop: () => { if (state === 'playing') doDrop(); },
       resetSave: () => { try { localStorage.removeItem('skystack.save'); } catch (e) {} },
       openShop: () => { if (state === 'menu') state = 'shop'; },
+      closeShop: () => { if (state === 'shop') state = 'menu'; },
+      simulateTiming,
+      setHidden: (hidden) => setPaused('test-visibility', !!hidden),
+      soakStep: (seconds = 1) => { for (let n = 0; n < Math.round(seconds / FIXED_STEP); n++) update(FIXED_STEP); },
     };
   }
   requestAnimationFrame(frame);

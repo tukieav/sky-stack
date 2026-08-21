@@ -6,7 +6,8 @@
   "private": true,
   "scripts": {
     "build": "esbuild src/main.js --bundle --minify --outfile=dist/bundle.js && node scripts/pack.mjs",
-    "dev": "esbuild src/main.js --bundle --outfile=dist/bundle.js --watch --servedir=dist"
+    "dev": "esbuild src/main.js --bundle --outfile=dist/bundle.js --watch --servedir=dist",
+    "test": "node tests/e2e.mjs http://localhost:8525/ && node tests/determinism.mjs && node tools/e2e-viewport.cjs http://localhost:8525/ && node tools/e2e-lifecycle.cjs http://localhost:8525/ && node tools/e2e-soak.cjs http://localhost:8525/"
   },
   "devDependencies": {
     "esbuild": "^0.25.12",
