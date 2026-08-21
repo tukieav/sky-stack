@@ -24,7 +24,12 @@ async function clickPlay(page) {
   const bs = await page.evaluate(() => window.__astro.getButtons());
   const b = bs.find(q => q.id === 'play');
   const bb = await page.locator('#game').boundingBox();
-  await page.mouse.click(bb.x + b.x * bb.width / GAME_W, bb.y + b.y * bb.height / GAME_H);
+  const map = await page.evaluate(() => {
+    const r = document.getElementById('game').getBoundingClientRect();
+    const scale = innerWidth > innerHeight ? r.height / 960 : r.width / 540;
+    return { scale, left: (540 - r.width / scale) / 2, top: (960 - r.height / scale) / 2 };
+  });
+  await page.mouse.click(bb.x + (b.x - map.left) * map.scale, bb.y + (b.y - map.top) * map.scale);
   await page.waitForTimeout(300);
 }
 async function smartDrop(page, tol = 7) {
@@ -144,7 +149,7 @@ async function playTo(page, floor) {
 }
 
 // ---------- videos <20s: landscape + portrait ----------
-for (const [vw, vh, name] of [[1280, 720, 'video-landscape']]) {
+for (const [vw, vh, name] of [[1280, 720, 'video-landscape'], [540, 960, 'video-portrait']]) {
   const dir = root + '/marketing/_vid';
   rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true });
   const ctx2 = await browser.newContext({ viewport: { width: vw, height: vh }, recordVideo: { dir, size: { width: vw, height: vh } } });
