@@ -17,6 +17,7 @@ npm ci
 npm run dev      # esbuild watch + dev server
 npm run build    # minified bundle -> dist/
 node tests/e2e.mjs [url]   # e2e (default http://localhost:8481/)
+node tools/e2e-desktop.cjs [url] # 1280x720, 1920x1080 and mobile viewport smoke test
 ```
 
 ## Submission

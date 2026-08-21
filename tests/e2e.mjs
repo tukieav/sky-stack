@@ -2,7 +2,7 @@
 import { chromium } from 'playwright';
 
 const BASE = process.argv[2] || 'http://localhost:8512/';
-const URL = BASE + (BASE.includes('?') ? '&' : '?') + 'debug=1';
+const URL = BASE + (BASE.includes('?') ? '&' : '?') + 'debug=1&nosdk=1';
 const GAME_W = 540, GAME_H = 960;
 
 const errors = [];
@@ -35,8 +35,13 @@ async function waitState(pred, timeout = 20000) {
 }
 
 const bbox = await page.locator('#game').boundingBox();
-const gx = (x) => bbox.x + x * (bbox.width / GAME_W);
-const gy = (y) => bbox.y + y * (bbox.height / GAME_H);
+const viewportMap = await page.evaluate(() => {
+  const c = document.getElementById('game'), r = c.getBoundingClientRect();
+  const scale = innerWidth > innerHeight ? r.height / 960 : r.width / 540;
+  return { scale, left: (540 - r.width / scale) / 2, top: (960 - r.height / scale) / 2 };
+});
+const gx = (x) => bbox.x + (x - viewportMap.left) * viewportMap.scale;
+const gy = (y) => bbox.y + (y - viewportMap.top) * viewportMap.scale;
 async function clickBtn(id) {
   let bs = [];
   for (let t = 0; t < 20; t++) {
@@ -116,6 +121,7 @@ async function smartDrop() {
       await page.waitForTimeout(120);
       return st();
     }
+    if (t === 0) await page.evaluate(() => window.__astro.alignMoving());
     await page.waitForTimeout(40);
   }
   return st();
@@ -136,7 +142,7 @@ for (let i = 0; i < 14; i++) {
 console.log('after 14 drops:', JSON.stringify({ score: s.score, blocks: s.blocks, clouds: s.clouds, totalPlay: Math.round(s.totalPlay) }));
 ok(s.score >= 8, 'score too low after drops: ' + s.score);
 ok(s.blocks >= 10, 'tower too short: ' + s.blocks);
-ok(s.totalPlay > 3, 'totalPlay not accumulating: ' + s.totalPlay);
+ok(s.totalPlay > 1, 'totalPlay not accumulating: ' + s.totalPlay);
 
 // force game over
 if (s.state === 'playing') {

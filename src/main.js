@@ -13,13 +13,23 @@ const BASE_Y = 880;                    // world y of top of base block
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
-canvas.width = GAME_W; canvas.height = GAME_H;
+let cssW = GAME_W, cssH = GAME_H, dpr = 1;
+let viewScale = 1, viewW = GAME_W, viewH = GAME_H, viewLeft = 0, viewTop = 0;
 
 function resize() {
-  const ww = window.innerWidth, wh = window.innerHeight;
-  const s = Math.min(ww / GAME_W, wh / GAME_H);
-  canvas.style.width = (GAME_W * s) + 'px';
-  canvas.style.height = (GAME_H * s) + 'px';
+  cssW = Math.max(1, window.innerWidth);
+  cssH = Math.max(1, window.innerHeight);
+  dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+  // Keep the tower's portrait game-space at its intended proportions. On a
+  // desktop the additional logical width becomes a playable-looking world;
+  // on phones the portrait play field remains comfortably sized.
+  viewScale = cssW > cssH ? cssH / GAME_H : cssW / GAME_W;
+  viewW = cssW / viewScale;
+  viewH = cssH / viewScale;
+  viewLeft = (GAME_W - viewW) / 2;
+  viewTop = (GAME_H - viewH) / 2;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
 }
 window.addEventListener('resize', resize); resize();
 
@@ -103,7 +113,9 @@ function spawnMoving(widthOverride) {
     hue: hueFor(lv),
     y: levelY(lv),
   };
-  targetCamY = Math.max(0, lv * BH - 340);
+  // Keep the active construction zone in the upper third once the tower is
+  // tall enough. This leaves a substantial, readable tower below it.
+  targetCamY = Math.max(0, lv * BH - 600);
 }
 
 // ---------- particles / feel ----------
@@ -157,7 +169,9 @@ function doDrop() {
     return;
   }
 
-  const frac = magnetT > 0 ? MAGNET_FRAC : PERFECT_FRAC;
+  // The opening is deliberately friendly: newcomers get three broad perfect
+  // windows before the normal timing challenge takes over.
+  const frac = level <= 3 ? 0.86 : (magnetT > 0 ? MAGNET_FRAC : PERFECT_FRAC);
   const isPerfect = overlap >= frac * moving.w;
   let placed;
   if (isPerfect) {
@@ -298,7 +312,10 @@ function usePowerup(id) {
 // ---------- input ----------
 function gameCoords(e) {
   const r = canvas.getBoundingClientRect();
-  return { x: (e.clientX - r.left) * (GAME_W / r.width), y: (e.clientY - r.top) * (GAME_H / r.height) };
+  return {
+    x: viewLeft + (e.clientX - r.left) / viewScale,
+    y: viewTop + (e.clientY - r.top) / viewScale,
+  };
 }
 
 function handleButton(id) {
@@ -447,13 +464,13 @@ function drawSky() {
   bg.addColorStop(0.55, `rgb(${Math.round((top[0] + bot[0]) / 2)},${Math.round((top[1] + bot[1]) / 2)},${Math.round((top[2] + bot[2]) / 2)})`);
   bg.addColorStop(1, `rgb(${bot[0]},${bot[1]},${bot[2]})`);
   ctx.fillStyle = bg;
-  ctx.fillRect(-20, -20, GAME_W + 40, GAME_H + 40);
+  ctx.fillRect(viewLeft - 20, viewTop - 20, viewW + 40, viewH + 40);
   // keep page letterbox in sync with sky so fullscreen has no dead zones
   const bgCss = `rgb(${bot[0]},${bot[1]},${bot[2]})`;
   if (bgCss !== lastBodyBg) { lastBodyBg = bgCss; document.body.style.background = bgCss; }
 
   // sun (day) fading into moon (space) — position by theme
-  const sunX = GAME_W - 105, sunY = 138 + camY * 0.06;
+  const sunX = Math.min(viewLeft + viewW - 105, GAME_W - 105), sunY = 138 + camY * 0.06;
   if (e < 0.75) {
     const a = (1 - e / 0.75);
     const g = ctx.createRadialGradient(sunX, sunY, 4, sunX, sunY, 90);
@@ -480,7 +497,7 @@ function drawSky() {
   if (level > 32) {
     const alpha = Math.min(1, (level - 32) / 32);
     for (const s of stars) {
-      const sy = ((s.y + camY * 0.35) % (GAME_H + 40)) - 20;
+      const sy = ((s.y + camY * 0.35) % (viewH + 40)) + viewTop - 20;
       const tw = 0.75 + 0.25 * Math.sin(windT * 2.2 + s.x);
       ctx.fillStyle = `rgba(255,255,255,${(s.a * alpha * tw).toFixed(3)})`;
       ctx.beginPath(); ctx.arc(s.x, sy, s.r, 0, Math.PI * 2); ctx.fill();
@@ -490,7 +507,7 @@ function drawSky() {
       ctx.strokeStyle = `rgba(255,255,255,${(0.5 * alpha).toFixed(3)})`;
       ctx.lineWidth = 1;
       for (let i = 0; i < 4; i++) {
-        const gx2 = (i * 137 + 60) % GAME_W, gy2 = ((i * 271 + camY * 0.35) % GAME_H);
+        const gx2 = viewLeft + ((i * 137 + 60) % viewW), gy2 = viewTop + ((i * 271 + camY * 0.35) % viewH);
         ctx.beginPath();
         ctx.moveTo(gx2 - 7, gy2); ctx.lineTo(gx2 + 7, gy2);
         ctx.moveTo(gx2, gy2 - 7); ctx.lineTo(gx2, gy2 + 7);
@@ -502,12 +519,13 @@ function drawSky() {
   // distant city skyline near the ground (parallax, fades with height)
   const groundA = Math.max(0, 1 - level / 18);
   if (groundA > 0) {
-    const baseY = GAME_H - 40 + camY * 0.85;
+    const baseY = viewTop + viewH - 40 + camY * 0.85;
     ctx.fillStyle = `rgba(30,40,70,${(0.5 * groundA).toFixed(3)})`;
-    for (let i = 0; i < 12; i++) {
+    const start = Math.floor((viewLeft - 80) / 61), end = Math.ceil((viewLeft + viewW + 80) / 61);
+    for (let i = start; i < end; i++) {
       const bw = 34 + (i * 53) % 40;
       const bh2 = 60 + (i * 97) % 130;
-      const bx = (i * 61) % (GAME_W + 60) - 30;
+      const bx = i * 61;
       ctx.fillRect(bx, baseY - bh2, bw, bh2 + 60);
       // lit windows in the silhouette
       ctx.fillStyle = `rgba(255,230,140,${(0.35 * groundA).toFixed(3)})`;
@@ -527,10 +545,11 @@ function drawSky() {
       const depth = 0.3 + layer * 0.28;
       const drift = windT * (6 + layer * 5);
       ctx.fillStyle = `rgba(255,255,255,${(0.14 + layer * 0.11) * cloudA})`;
-      for (let i = 0; i < 4; i++) {
+      const start = Math.floor((viewLeft - 180) / 190), end = Math.ceil((viewLeft + viewW + 180) / 190);
+      for (let i = start; i < end; i++) {
         const seed = i * 191 + layer * 631;
-        const cy2 = ((seed % 900) + camY * depth) % (GAME_H + 260) - 130;
-        const cx2 = ((seed * 7 % (GAME_W + 300)) + drift) % (GAME_W + 300) - 150;
+        const cy2 = ((seed % 900) + camY * depth) % (viewH + 260) + viewTop - 130;
+        const cx2 = i * 190 + ((seed * 7) % 80) + drift % 190;
         const sc = 0.7 + layer * 0.35;
         ctx.beginPath();
         ctx.ellipse(cx2, cy2, 78 * sc, 24 * sc, 0, 0, Math.PI * 2);
@@ -696,6 +715,61 @@ function drawCrane(mx, my, w) {
   ctx.stroke();
 }
 
+function isDesktopLayout() { return cssW > 600 && cssW / cssH > 1.08; }
+
+// The landscape world is deliberately drawn outside the portrait play field.
+// It turns the desktop frame into a city vista instead of a scaled-up phone.
+function drawWideWorld() {
+  if (!isDesktopLayout()) return;
+  const horizon = Math.min(viewTop + viewH - 62, worldToScreen(BASE_Y + BH));
+  const leftEdge = viewLeft, rightEdge = viewLeft + viewW;
+  const fade = Math.max(0.18, 1 - level / 70);
+
+  // Far atmospheric skyline, with enough irregularity to keep both edges alive.
+  ctx.fillStyle = `rgba(21,34,66,${(0.52 * fade).toFixed(3)})`;
+  for (let x = Math.floor(leftEdge / 74) * 74; x < rightEdge + 80; x += 74) {
+    const seed = Math.abs((x / 74 | 0) * 917);
+    const h = 70 + seed % 150;
+    const w = 38 + seed % 35;
+    ctx.fillRect(x, horizon - h, w, h + 90);
+    ctx.fillStyle = `rgba(255,224,145,${(0.16 * fade).toFixed(3)})`;
+    for (let wy = horizon - h + 14; wy < horizon - 10; wy += 24) {
+      if (((wy + seed) | 0) % 3) ctx.fillRect(x + 9, wy, 5, 8);
+    }
+    ctx.fillStyle = `rgba(21,34,66,${(0.52 * fade).toFixed(3)})`;
+  }
+
+  // Two neighbouring construction sites give the tower a city-scale context.
+  const sites = [GAME_W / 2 - 520, GAME_W / 2 + 410];
+  for (const sx of sites) {
+    const towerH = 190 + ((Math.abs(sx) * 7) % 90);
+    const towerW = 150;
+    const top = horizon - towerH;
+    const g = ctx.createLinearGradient(sx, top, sx + towerW, horizon);
+    g.addColorStop(0, 'rgba(67,92,137,0.82)'); g.addColorStop(1, 'rgba(26,40,75,0.92)');
+    ctx.fillStyle = g; ctx.fillRect(sx, top, towerW, towerH);
+    ctx.fillStyle = 'rgba(255,235,165,0.34)';
+    for (let yy = top + 18; yy < horizon - 12; yy += 28) {
+      for (let xx = sx + 14; xx < sx + towerW - 14; xx += 24) ctx.fillRect(xx, yy, 8, 11);
+    }
+    // Crane mast, jib and cable.
+    const mastX = sx + towerW * 0.56, mastTop = top - 150;
+    ctx.strokeStyle = 'rgba(44,48,65,0.92)'; ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(mastX, horizon); ctx.lineTo(mastX, mastTop); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,194,70,0.9)'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(mastX - 112, mastTop + 18); ctx.lineTo(mastX + 128, mastTop + 18); ctx.stroke();
+    ctx.strokeStyle = 'rgba(35,40,58,0.75)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(mastX + 76, mastTop + 18); ctx.lineTo(mastX + 76, mastTop + 70 + Math.sin(windT * 1.3) * 8); ctx.stroke();
+  }
+
+  // Low road / park detail fills the panoramic lower edge.
+  const ground = ctx.createLinearGradient(0, horizon, 0, viewTop + viewH);
+  ground.addColorStop(0, 'rgba(38,55,73,0.9)'); ground.addColorStop(1, 'rgba(15,23,42,0.98)');
+  ctx.fillStyle = ground; ctx.fillRect(leftEdge - 20, horizon, viewW + 40, viewTop + viewH - horizon + 30);
+  ctx.fillStyle = 'rgba(255,214,110,0.28)';
+  for (let x = leftEdge - 20; x < rightEdge + 20; x += 94) ctx.fillRect(x, horizon + 38, 44, 3);
+}
+
 function drawBtn(cx, cy, w, h, label, id, color, fontSize = 26) {
   const x = cx - w / 2, y = cy - h / 2;
   ctx.fillStyle = color;
@@ -766,14 +840,65 @@ function drawAltimeter() {
   ctx.restore();
 }
 
+function desktopLabel(text, x, y, color = 'rgba(255,255,255,0.8)', size = 16, align = 'left') {
+  ctx.fillStyle = color;
+  ctx.font = `700 ${size}px "Segoe UI", Arial, sans-serif`;
+  ctx.textAlign = align; ctx.textBaseline = 'top';
+  ctx.fillText(text, x, y);
+}
+
+function drawDesktopUI() {
+  if (!isDesktopLayout() || !(state === 'menu' || state === 'playing' || state === 'gameover' || state === 'ad')) return;
+  const panelW = 280, gap = 46;
+  const lx = viewLeft + gap, rx = viewLeft + viewW - panelW - gap;
+  const panelY = Math.max(viewTop + 46, 46);
+
+  // Left: currency and contracts. These stay spatially separate from the tower.
+  cloudPanel(lx, panelY, panelW, 274, 0.52);
+  desktopLabel('SKYLINE CONTRACTS', lx + 22, panelY + 20, '#dceeff', 19);
+  desktopLabel('CLOUD BALANCE', lx + 22, panelY + 57, 'rgba(255,255,255,0.58)', 13);
+  desktopLabel('☁ ' + save.clouds, lx + 22, panelY + 76, '#bfe3ff', 29);
+  ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(lx + 18, panelY + 119, panelW - 36, 1);
+  desktopLabel('TODAY\'S MISSIONS', lx + 22, panelY + 137, '#ffe86b', 14);
+  let yy = panelY + 164;
+  for (const m of save.daily.missions.slice(0, 3)) {
+    const done = m.done;
+    desktopLabel(done ? '✓' : '○', lx + 22, yy, done ? '#7bffb0' : '#bfe3ff', 18);
+    desktopLabel(m.text, lx + 47, yy + 2, done ? '#a8e9be' : 'rgba(255,255,255,0.88)', 14);
+    const p = Math.min(1, m.prog / m.goal);
+    ctx.fillStyle = 'rgba(255,255,255,0.13)'; ctx.fillRect(lx + 47, yy + 23, 185, 5);
+    ctx.fillStyle = done ? '#7bffb0' : '#8fc9ff'; ctx.fillRect(lx + 47, yy + 23, 185 * p, 5);
+    yy += 35;
+  }
+
+  // Right: visible altitude goals and useful in-run tools.
+  cloudPanel(rx, panelY, panelW, 338, 0.52);
+  desktopLabel('ASCENT', rx + 22, panelY + 20, '#dceeff', 19);
+  desktopLabel('FLOOR ' + level, rx + 22, panelY + 54, '#ffffff', 31);
+  const nextMilestone = Math.ceil((level + 1) / 25) * 25;
+  desktopLabel('NEXT MILESTONE', rx + 22, panelY + 96, 'rgba(255,255,255,0.58)', 13);
+  desktopLabel('FLOOR ' + nextMilestone + '  ·  +' + nextMilestone + ' ☁', rx + 22, panelY + 116, '#ffe86b', 16);
+  ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(rx + 22, panelY + 150, panelW - 44, 1);
+  const unlocks = level < 12 ? 'Cloud district ahead' : level < 35 ? 'Jetstream skyline ahead' : level < 65 ? 'Night orbit ahead' : 'Deep-space crown unlocked';
+  desktopLabel('NEXT VISUAL UNLOCK', rx + 22, panelY + 169, 'rgba(255,255,255,0.58)', 13);
+  desktopLabel(unlocks, rx + 22, panelY + 191, '#bfe3ff', 16);
+  if (state === 'playing') {
+    if (save.slowmo > 0 && slowmoT <= 0) drawBtn(rx + 83, panelY + 258, 122, 52, '⏱ SLOW ×' + save.slowmo, 'pu-slowmo', 'rgba(159,212,255,0.94)', 14);
+    if (save.magnet > 0 && magnetT <= 0) drawBtn(rx + 205, panelY + 258, 122, 52, '🧲 MAG ×' + save.magnet, 'pu-magnet', 'rgba(255,210,159,0.94)', 14);
+    desktopLabel('1 / 2  power-ups', rx + 22, panelY + 294, 'rgba(255,255,255,0.52)', 13);
+  }
+}
+
 function worldToScreen(wy) { return wy + camY; }
 
 function draw() {
   buttons = [];
+  ctx.setTransform(dpr * viewScale, 0, 0, dpr * viewScale, -viewLeft * dpr * viewScale, -viewTop * dpr * viewScale);
   ctx.save();
   if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
 
   drawSky();
+  drawWideWorld();
 
   // solid ground strip under the base block (anchors the tower)
   {
@@ -783,13 +908,13 @@ function draw() {
       gg.addColorStop(0, 'rgba(46,58,86,0.95)');
       gg.addColorStop(1, 'rgba(24,30,48,0.98)');
       ctx.fillStyle = gg;
-      ctx.fillRect(-20, gy2, GAME_W + 40, GAME_H + 40 - gy2);
+      ctx.fillRect(viewLeft - 20, gy2, viewW + 40, viewTop + viewH + 40 - gy2);
       // sidewalk edge
       ctx.fillStyle = 'rgba(200,210,230,0.35)';
-      ctx.fillRect(-20, gy2, GAME_W + 40, 3);
+      ctx.fillRect(viewLeft - 20, gy2, viewW + 40, 3);
       // road dashes
       ctx.fillStyle = 'rgba(255,220,120,0.3)';
-      for (let dx2 = 10; dx2 < GAME_W; dx2 += 60) ctx.fillRect(dx2, gy2 + 22, 26, 3);
+      for (let dx2 = Math.floor(viewLeft / 60) * 60; dx2 < viewLeft + viewW; dx2 += 60) ctx.fillRect(dx2, gy2 + 22, 26, 3);
     }
   }
 
@@ -870,13 +995,13 @@ function draw() {
       ctx.fillText('PERFECT x' + perfectCombo, GAME_W / 2, 122);
     }
     cloudsHud(16, 20);
-    if (state === 'playing') drawAltimeter();
+    if (state === 'playing' && !isDesktopLayout()) drawAltimeter();
   }
 
   // in-run power-up buttons + active timers
   if (state === 'playing') {
-    if (save.slowmo > 0 && slowmoT <= 0) drawBtn(70, GAME_H - 50, 116, 54, '⏱ ×' + save.slowmo, 'pu-slowmo', 'rgba(159,212,255,0.92)', 22);
-    if (save.magnet > 0 && magnetT <= 0) drawBtn(GAME_W - 70, GAME_H - 50, 116, 54, '🧲 ×' + save.magnet, 'pu-magnet', 'rgba(255,210,159,0.92)', 22);
+    if (!isDesktopLayout() && save.slowmo > 0 && slowmoT <= 0) drawBtn(70, GAME_H - 50, 116, 54, '⏱ ×' + save.slowmo, 'pu-slowmo', 'rgba(159,212,255,0.92)', 22);
+    if (!isDesktopLayout() && save.magnet > 0 && magnetT <= 0) drawBtn(GAME_W - 70, GAME_H - 50, 116, 54, '🧲 ×' + save.magnet, 'pu-magnet', 'rgba(255,210,159,0.92)', 22);
     ctx.font = '700 18px "Segoe UI", Arial, sans-serif';
     ctx.textAlign = 'left'; ctx.textBaseline = 'top';
     if (slowmoT > 0) { ctx.fillStyle = '#9fd4ff'; ctx.fillText('⏱ ' + slowmoT.toFixed(0) + 's', 16, 60); }
@@ -890,51 +1015,58 @@ function draw() {
       ctx.textAlign = 'center';
       ctx.fillStyle = aligned ? `rgba(123,255,176,${pulse.toFixed(2)})` : 'rgba(255,255,255,0.85)';
       ctx.font = '800 28px "Segoe UI", Arial, sans-serif';
-      ctx.fillText(aligned ? 'TAP NOW!' : 'Wait for the block to line up…', GAME_W / 2, GAME_H - 140);
+      ctx.fillText(aligned ? 'TAP NOW!' : 'Watch the hook — tap when it lines up', GAME_W / 2, GAME_H - 140);
     }
   }
 
   if (state === 'menu') {
-    ctx.fillStyle = 'rgba(0,0,0,0.25)';
-    ctx.fillRect(0, 0, GAME_W, GAME_H);
+    const desktop = isDesktopLayout();
+    if (desktop) cloudPanel(66, 104, GAME_W - 132, 430, 0.48);
+    else {
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.fillRect(0, 0, GAME_W, GAME_H);
+    }
     ctx.fillStyle = '#ffffff';
     ctx.shadowColor = 'rgba(120,180,255,0.9)'; ctx.shadowBlur = 24;
-    ctx.font = '900 84px "Segoe UI", Arial, sans-serif';
+    ctx.font = `900 ${desktop ? 62 : 84}px "Segoe UI", Arial, sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-    ctx.fillText('SKY', GAME_W / 2, 150);
-    ctx.fillText('STACK', GAME_W / 2, 240);
+    if (desktop) ctx.fillText('SKY STACK', GAME_W / 2, 150);
+    else { ctx.fillText('SKY', GAME_W / 2, 150); ctx.fillText('STACK', GAME_W / 2, 240); }
     ctx.shadowBlur = 0;
     ctx.font = '600 24px "Segoe UI", Arial, sans-serif';
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
-    ctx.fillText('Tap to drop. Stack to the stars.', GAME_W / 2, 350);
-    ctx.fillText('BEST: ' + best, GAME_W / 2, 390);
-    cloudsHud(16, 20);
+    const subY = desktop ? 245 : 350;
+    ctx.fillText('Tap to drop. Stack to the stars.', GAME_W / 2, subY);
+    ctx.fillText('BEST: ' + best, GAME_W / 2, subY + 40);
+    if (!desktop) cloudsHud(16, 20);
     // streak badge
     if (save.streak.count > 1) {
       ctx.fillStyle = '#ffd27b';
       ctx.font = '700 20px "Segoe UI", Arial, sans-serif';
-      ctx.fillText('🔥 ' + save.streak.count + '-day streak', GAME_W / 2, 424);
+      ctx.fillText('🔥 ' + save.streak.count + '-day streak', GAME_W / 2, subY + 74);
     }
-    drawBtn(GAME_W / 2, 520, 240, 74, 'PLAY', 'play', '#ffe86b');
-    drawBtn(GAME_W / 2, 616, 240, 60, '☁ SHOP', 'shop', '#9fd4ff', 24);
+    drawBtn(GAME_W / 2, desktop ? 365 : 520, 240, 74, 'PLAY', 'play', '#ffe86b');
+    drawBtn(GAME_W / 2, desktop ? 457 : 616, 240, 60, '☁ SHOP', 'shop', '#9fd4ff', 24);
     drawBtn(GAME_W - 54, 44, 76, 48, save.musicOn ? '♪ ON' : '♪ OFF', 'music', 'rgba(255,255,255,0.75)', 18);
 
     // daily missions panel
     ensureDaily();
-    cloudPanel(50, 680, GAME_W - 100, 190, 0.34);
-    ctx.fillStyle = '#ffe86b';
-    ctx.font = '800 22px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('DAILY MISSIONS', GAME_W / 2, 696);
-    ctx.font = '600 19px "Segoe UI", Arial, sans-serif';
-    let my = 734;
-    for (const m of save.daily.missions) {
-      ctx.fillStyle = m.done ? '#7bffb0' : 'rgba(255,255,255,0.9)';
-      ctx.textAlign = 'left';
-      ctx.fillText((m.done ? '✓ ' : '• ') + m.text, 70, my);
-      ctx.textAlign = 'right';
-      ctx.fillText(m.done ? 'DONE' : (Math.min(m.prog, m.goal) + '/' + m.goal + '  +' + m.reward + '☁'), GAME_W - 70, my);
-      my += 40;
-      ctx.textAlign = 'center';
+    if (!desktop) {
+      cloudPanel(50, 680, GAME_W - 100, 190, 0.34);
+      ctx.fillStyle = '#ffe86b';
+      ctx.font = '800 22px "Segoe UI", Arial, sans-serif';
+      ctx.fillText('DAILY MISSIONS', GAME_W / 2, 696);
+      ctx.font = '600 19px "Segoe UI", Arial, sans-serif';
+      let my = 734;
+      for (const m of save.daily.missions) {
+        ctx.fillStyle = m.done ? '#7bffb0' : 'rgba(255,255,255,0.9)';
+        ctx.textAlign = 'left';
+        ctx.fillText((m.done ? '✓ ' : '• ') + m.text, 70, my);
+        ctx.textAlign = 'right';
+        ctx.fillText(m.done ? 'DONE' : (Math.min(m.prog, m.goal) + '/' + m.goal + '  +' + m.reward + '☁'), GAME_W - 70, my);
+        my += 40;
+        ctx.textAlign = 'center';
+      }
     }
   }
 
@@ -1025,6 +1157,8 @@ function draw() {
     ctx.fillText('...', GAME_W / 2, GAME_H / 2);
   }
 
+  drawDesktopUI();
+
   // toasts (screen space, top center)
   let ty = 170;
   for (const t of toasts) {
@@ -1091,6 +1225,7 @@ async function boot() {
       buyWide: () => buyWide(),
       buyPowerup: (id) => buyPowerup(id),
       usePowerup: (id) => usePowerup(id),
+      alignMoving: () => { if (state === 'playing' && moving && blocks.length) moving.cx = blocks[blocks.length - 1].cx; },
       resetSave: () => { try { localStorage.removeItem('skystack.save'); } catch (e) {} },
       openShop: () => { if (state === 'menu') state = 'shop'; },
     };
