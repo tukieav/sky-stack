@@ -28,6 +28,8 @@ FEATURES
 - PERFECT combo system: chain flawless drops for multiplied points
 - Blocks grow back after perfect streaks — comebacks are always possible
 - Rainbow tower: colors cycle through the spectrum as you climb
+- Build inside a living panoramic skyline on desktop: neighbouring towers, cranes,
+  cloud layers and aircraft frame every ascent
 - Fly from daytime skies into starry space as your tower rises
 - Speed increases with height for an ever-growing challenge
 - Watch cut pieces tumble away with satisfying physics
@@ -61,7 +63,8 @@ Click / tap / Space — drop the block.
 - game.settings.muteAudio respected + settings change listener
 - Full progress (best score, clouds currency, themes, upgrades, missions, streak) via data module with localStorage fallback
 - No external requests, all assets procedural (Canvas 2D + WebAudio), bundle ~10 KB
-- Touch + mouse + keyboard; portrait-friendly, works on low-end devices
+- Full-viewport DPR-aware desktop canvas with integrated contracts/ascent UI;
+  touch + mouse + keyboard and portrait-friendly mobile controls
 - Live demo: https://tukieav.github.io/sky-stack/
 
 ## Files to upload

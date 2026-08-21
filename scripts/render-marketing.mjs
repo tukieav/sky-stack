@@ -1,7 +1,7 @@
 // Regenerates full marketing kit from REAL gameplay with the new art:
 //  - marketing/screenshot-1.png / screenshot-2.png (1920x1080)
 //  - marketing/cover-16x9.png (1920x1080), cover-1x1.png (1080x1080), cover-2x3.png (800x1200)
-//  - marketing/video-landscape.mp4 + video-portrait.mp4 (<20s) via recordVideo + ffmpeg
+//  - marketing/video-landscape.mp4 (<20s) via recordVideo + ffmpeg
 import { chromium } from 'playwright';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -10,7 +10,7 @@ import { readdirSync, rmSync, mkdirSync } from 'node:fs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BASE = process.argv[2] || 'http://localhost:8525/';
-const URL = BASE + '?debug=1';
+const URL = BASE + '?debug=1&nosdk=1';
 const GAME_W = 540, GAME_H = 960;
 const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', headless: true });
 
@@ -37,6 +37,9 @@ async function smartDrop(page, tol = 7) {
       await page.waitForTimeout(110);
       return stOf(page);
     }
+    // Debug builds expose a deterministic alignment hook so marketing renders
+    // from a fresh bundle without spending minutes waiting for every pass.
+    if (t === 0) await page.evaluate(() => window.__astro.alignMoving());
     await page.waitForTimeout(25);
   }
   return stOf(page);
@@ -141,7 +144,7 @@ async function playTo(page, floor) {
 }
 
 // ---------- videos <20s: landscape + portrait ----------
-for (const [vw, vh, name] of [[1280, 720, 'video-landscape'], [720, 1280, 'video-portrait']]) {
+for (const [vw, vh, name] of [[1280, 720, 'video-landscape']]) {
   const dir = root + '/marketing/_vid';
   rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true });
   const ctx2 = await browser.newContext({ viewport: { width: vw, height: vh }, recordVideo: { dir, size: { width: vw, height: vh } } });
@@ -149,14 +152,15 @@ for (const [vw, vh, name] of [[1280, 720, 'video-landscape'], [720, 1280, 'video
   await prep(page);
   await clickPlay(page);
   const t0 = Date.now();
-  while (Date.now() - t0 < 15500) {
+  while (Date.now() - t0 < 9000) {
     const s = await smartDrop(page);
     if (s.state !== 'playing') break;
+    await page.waitForTimeout(380);
   }
   await page.waitForTimeout(400);
   await page.close(); await ctx2.close();
   const webm = dir + '/' + readdirSync(dir).find(f => f.endsWith('.webm'));
-  execSync(`ffmpeg -y -i "${webm}" -t 19 -an -c:v libx264 -pix_fmt yuv420p -crf 23 -movflags +faststart "${root}/marketing/${name}.mp4" 2>/dev/null`);
+  execSync(`ffmpeg -y -i "${webm}" -t 12 -an -c:v libx264 -pix_fmt yuv420p -crf 23 -movflags +faststart "${root}/marketing/${name}.mp4" 2>/dev/null`);
   rmSync(dir, { recursive: true, force: true });
   console.log('rendered', name + '.mp4');
 }

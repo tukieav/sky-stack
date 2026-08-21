@@ -3,6 +3,8 @@ let sdk = null;
 let inited = false;
 
 export async function initSDK() {
+  // Local visual/e2e runs must not wait for a third-party SDK handshake.
+  if (new URLSearchParams(location.search).get('nosdk') === '1') return false;
   try {
     if (window.CrazyGames && window.CrazyGames.SDK) {
       // SDK.init() may hang forever on non-whitelisted domains (sitelock),

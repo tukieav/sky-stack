@@ -1,7 +1,7 @@
 // QA screenshot capture: menu, early game, cloud band, space, gameover, shop
 import { chromium } from 'playwright';
 const BASE = process.argv[2] || 'http://localhost:8525/';
-const URL = BASE + '?debug=1';
+const URL = BASE + '?debug=1&nosdk=1';
 const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', headless: true });
 const page = await browser.newPage({ viewport: { width: 640, height: 1000 } });
 await page.goto(URL, { waitUntil: 'networkidle' });
@@ -18,7 +18,12 @@ async function clickBtn(id) {
   const bs = await btns();
   const b = bs.find(q => q.id === id);
   const bb = await page.locator('#game').boundingBox();
-  await page.mouse.click(bb.x + b.x * bb.width / 540, bb.y + b.y * bb.height / 960);
+  const map = await page.evaluate(() => {
+    const c = document.getElementById('game'), r = c.getBoundingClientRect();
+    const scale = innerWidth > innerHeight ? r.height / 960 : r.width / 540;
+    return { scale, left: (540 - r.width / scale) / 2, top: (960 - r.height / scale) / 2 };
+  });
+  await page.mouse.click(bb.x + (b.x - map.left) * map.scale, bb.y + (b.y - map.top) * map.scale);
   await page.waitForTimeout(300);
 }
 await clickBtn('shop');
@@ -35,7 +40,7 @@ async function playTo(floor, name) {
       const bb = await page.locator('#game').boundingBox();
       await page.mouse.click(bb.x + bb.width / 2, bb.y + bb.height / 2);
       await page.waitForTimeout(90);
-    } else await page.waitForTimeout(30);
+    } else { await page.evaluate(() => window.__astro.alignMoving()); await page.waitForTimeout(30); }
   }
   return false;
 }
