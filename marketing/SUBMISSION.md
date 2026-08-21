@@ -1,77 +1,80 @@
-# Sky Stack — CrazyGames Submission Kit
-
-Wszystko poniżej wklejasz w formularz na https://developer.crazygames.com/
+# Sky Stack — CrazyGames submission
 
 ## Game name
+
 Sky Stack
 
-## Category
-Casual (secondary: Arcade)
+## Category and discovery
 
-## Tags
-stack, tower, tap, timing, one-tap, arcade, casual, endless, reflex, one-hand
+- Primary category: **Arcade** (`/c/arcade`)
+- Secondary discovery: **Casual**
+- Verified tags only: **Casual, One Button, Skill, Mobile, 2D, Physics**
 
-## Short description (max ~140 chars)
-Tap to drop blocks and stack a rainbow tower to the stars! Nail PERFECT drops to grow your block back. One tap, endless heights.
+## Short description (132 characters)
+
+Time each drop, land perfect floors, and raise a detailed city tower from the
+street to the edge of space.
 
 ## Full description
-Sky Stack is a one-tap tower builder that's easy to learn and impossible to
-put down. A block slides back and forth above your tower — tap at just the
-right moment to drop it. Any part hanging over the edge gets sliced off and
-tumbles away, making your tower thinner and the game tenser with every level.
 
-Land a PERFECT drop (dead-center) to keep your full block — and chain 3+
-perfects in a row to GROW your block back and rack up huge combo bonuses!
+Build the skyline with a single well-timed action. Release each moving floor
+above the tower, preserve as much width as possible, and chain PERFECT landings
+to recover space and earn Clouds.
 
-FEATURES
-- Pure one-tap gameplay: works with mouse, touch or spacebar
-- PERFECT combo system: chain flawless drops for multiplied points
-- Blocks grow back after perfect streaks — comebacks are always possible
-- Rainbow tower: colors cycle through the spectrum as you climb
-- Build inside a living panoramic skyline on desktop: neighbouring towers, cranes,
-  cloud layers and aircraft frame every ascent
-- Fly from daytime skies into starry space as your tower rises
-- Speed increases with height for an ever-growing challenge
-- Watch cut pieces tumble away with satisfying physics
-- Earn CLOUDS ☁ from perfects, milestones and height — spend them in the shop
-- 6 unlockable tower/sky themes (Sunset, Ocean, Forest, Neon, Mono)
-- Permanent upgrades (wider starting base) + Slow-Mo and Magnet power-ups
-- Daily missions and a day-streak bonus that grows each day you return
-- Floor milestones every 25 floors with cloud rewards
-- Your best score and full progress are saved across devices
+The landing shadow and cut-off preview make the opening clear without a tutorial
+wall. As the tower becomes narrower and higher, a gentle structural sway and a
+wind indicator make its risk readable while preserving the one-button timing
+loop. Climb through changing city, cloud, jetstream, orbital-night and space
+environments, with visible district rewards every 10 floors and landmark rewards
+every 25 floors.
 
-HOW TO PLAY
-1. Tap / click / press Space to drop the moving block
-2. Overhanging parts get cut off — keep your block wide!
-3. Perfect drops (98%+ overlap) keep the full width
-4. 3+ perfects in a row make your block grow back
-5. Miss completely or shrink below the limit — game over!
+Spend Clouds on architectural themes, wider starting floors, Slow-Mo and Magnet
+assists, then return for rotating daily missions and altitude rewards.
 
-How high can you stack?
+## Current features
 
-## Controls text
-Click / tap / Space — drop the block.
+- One-click start; quick local restart after a natural game-over break
+- Forgiving but skill-based first three floors, then precise overlap timing
+- PERFECT chains, width recovery, score, Clouds, missions, streaks and themes
+- Bounded cut-piece debris and celebratory particles
+- Time-based 120 Hz fixed-step simulation for consistent movement and physics
+- Reduced-motion support, SDK mute support and strong in-game contrast
+- Persistent best score, currency, themes, upgrades and daily progress
 
-## SDK integration notes (QA reviewer info)
-- HTML5 SDK v3, manual init before game start
-- gameplayStart/gameplayStop on play/game over/ad breaks
-- loadingStart/loadingStop around boot
-- Midgame ad on "Play Again" after game over (throttled: max 1 per 90 s, instant restart otherwise)
-- Rewarded ad "Continue" (resume run from current height with a 70%-width block, once per run)
-- Rewarded ad "×2 Clouds" on the game-over screen (doubles the run's currency)
-- happytime() every 25 floors climbed and on daily-mission completion
-- game.settings.muteAudio respected + settings change listener
-- Full progress (best score, clouds currency, themes, upgrades, missions, streak) via data module with localStorage fallback
-- No external requests, all assets procedural (Canvas 2D + WebAudio), bundle ~10 KB
-- Full-viewport DPR-aware desktop canvas with integrated contracts/ascent UI;
-  touch + mouse + keyboard and portrait-friendly mobile controls
-- Live demo: https://tukieav.github.io/sky-stack/
+## Controls
 
-## Files to upload
-- Build zip: sky-stack.zip (repo root po `npm run build` + `cd dist && zip -r ../sky-stack.zip .`)
-- Cover 16:9 (1920x1080): marketing/cover-16x9.png
-- Cover 1:1 (1080x1080): marketing/cover-1x1.png
-- Screenshots: marketing/screenshot-1.png, marketing/screenshot-2.png (1920x1080)
+- Desktop: click or Space/Enter to release a floor; 1/2 use owned power-ups
+- Mobile: tap anywhere in play to release; all mobile buttons are at least 44
+  CSS pixels
 
-## Age rating / audience
-All ages; designed for 10–16. No violence, no blood, no text chat, no user content.
+## SDK, data and ads
+
+- CrazyGames SDK v3 initializes with a safe timeout; loading calls occur around
+  boot, and gameplay start/stop track active play.
+- Visibility, window focus and SDK ad events pause simulation, input and audio
+  once, then resume once when appropriate.
+- CrazyGames mute settings are respected. Local save is dual-written through
+  the SDK data module when available and localStorage fallback otherwise;
+  malformed/old data safely migrates or falls back.
+- A midgame ad may appear only at a natural Play Again break and is throttled;
+  rewarded Continue and ×2 Clouds are optional. No ad is mandatory to start,
+  restart, or progress in the core loop.
+
+## Audience, URL and resubmission
+
+- PEGI12 suitable: non-violent abstract construction; no blood, chat, user
+  content, cross-promotion or custom fullscreen.
+- Live URL: https://tukieav.github.io/sky-stack/
+- Quality resubmission: refreshed for responsive DPR=1 layouts, deterministic
+  timing, lifecycle safety, bounded effects, accessible motion settings and
+  clearer early-game risk feedback.
+
+## Upload files
+
+- Build: `sky-stack.zip`
+- Covers: `marketing/cover-16x9.png`, `marketing/cover-1x1.png`,
+  `marketing/cover-2x3.png`
+- Gameplay screenshots: `marketing/screenshot-1.png`,
+  `marketing/screenshot-2.png`
+- Gameplay videos: `marketing/video-landscape.mp4`,
+  `marketing/video-portrait.mp4`

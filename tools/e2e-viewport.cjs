@@ -5,7 +5,9 @@ const { mkdirSync } = require('node:fs');
 
 const base = process.argv[2] || 'http://localhost:8525/';
 const url = base + (base.includes('?') ? '&' : '?') + 'debug=1&nosdk=1';
-const sizes = [[907,510],[1216,684],[1077,606],[821,462],[1366,768],[1920,1080],[1536,864],[1280,720],[800,450],[1080,607],[390,844]];
+const requiredSizes = [[907,510],[1216,684],[1077,606],[821,462],[1366,768],[1920,1080],[1536,864],[1280,720],[800,450],[1080,607]];
+const proof = process.argv.includes('--proof');
+const sizes = proof ? [[907,510],[1280,720],[1920,1080],[390,844]] : process.argv.includes('--portrait') ? [[390,844]] : requiredSizes;
 const out = 'qa/hardening'; mkdirSync(out, { recursive: true });
 let failed = false;
 const ok = (condition, message) => { if (!condition) { failed = true; console.error('FAIL:', message); } };
@@ -57,7 +59,7 @@ const ok = (condition, message) => { if (!condition) { failed = true; console.er
     ok(state.blocks >= 2 || state.state === 'gameover', `${width}x${height}: keyboard path failed`);
     // Let short-lived score burst text clear so proof captures the readable
     // in-play layout, not a transient post-tap frame.
-    await page.waitForTimeout(1300);
+    await page.waitForTimeout(proof ? 1450 : 650);
     await page.screenshot({ path: `${out}/${width}x${height}-gameplay.png` });
     ok(errors.length === 0, `${width}x${height}: ${errors.join(' | ')}`);
     console.log(`${width}x${height}: DPR1 viewport, menu/play/touch/keyboard${(width===821||width===907) ? '/shop' : ''} OK`);

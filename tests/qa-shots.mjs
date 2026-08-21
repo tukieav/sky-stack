@@ -39,8 +39,8 @@ async function playTo(floor, name) {
     if (s.movingCx != null && Math.abs(s.movingCx - s.topCx) < 6) {
       const bb = await page.locator('#game').boundingBox();
       await page.mouse.click(bb.x + bb.width / 2, bb.y + bb.height / 2);
-      await page.waitForTimeout(90);
-    } else { await page.evaluate(() => window.__astro.alignMoving()); await page.waitForTimeout(30); }
+      await page.waitForTimeout(35);
+    } else { await page.evaluate(() => window.__astro.alignMoving()); await page.waitForTimeout(10); }
   }
   return false;
 }
