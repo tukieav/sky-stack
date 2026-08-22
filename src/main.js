@@ -138,6 +138,14 @@ function burst(x, y, hue, n, spd) {
     particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 60, life: 0.7 + Math.random() * 0.4, t: 0, hue });
   }
 }
+function impactDust(x, y) {
+  const available = Math.max(0, MAX_PARTICLES - particles.length);
+  for (let i = 0; i < Math.min(16, available); i++) {
+    const a = Math.PI + (Math.random() - 0.5) * 1.35;
+    const v = 45 + Math.random() * 105;
+    particles.push({ x, y: y + 3, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 18, life: 0.32 + Math.random() * 0.24, t: 0, hue: 42, dust: true });
+  }
+}
 function floatText(x, y, text, color, size = 26) {
   floaters.push({ x, y, text, life: 1.1, t: 0, color, size });
   if (floaters.length > MAX_FLOATERS) floaters.splice(0, floaters.length - MAX_FLOATERS);
@@ -172,6 +180,9 @@ function checkMissions(x, y) {
 
 function doDrop() {
   if (!moving) return;
+  // The first successful release is also the first-run onboarding's natural
+  // dismissal. It is stored immediately, so a refresh cannot show it again.
+  if (level === 0 && !save.hintDone) { save.hintDone = true; persistNow(); }
   const prev = blocks[blocks.length - 1];
   // Collision, prediction and drawing must share this exact visible roof.
   // Otherwise a swaying tower asks the player to time against pixels that
@@ -191,6 +202,9 @@ function doDrop() {
     triggerGameOver();
     return;
   }
+  // A short warm dust puff anchors every successful drop to the tower before
+  // the cut/perfect effects take over.
+  impactDust((oL + oR) / 2, y + BH);
 
   // The opening is deliberately friendly: newcomers get three broad perfect
   // windows before the normal timing challenge takes over.
@@ -240,8 +254,6 @@ function doDrop() {
   moving = null;
   save.blocksTotal++;
   save.daily.blocksToday = (save.daily.blocksToday || 0) + 1;
-  if (firstPerfect && !save.hintDone) { save.hintDone = true; persistNow(); }
-
   // A visible district/reward beat every 10 floors prevents an endless plateau.
   if (level % 10 === 0 && level > 0) {
     const major = level % 25 === 0;
@@ -365,6 +377,7 @@ function handleButton(id) {
   else if (id === 'double') doDoubleClouds();
   else if (id === 'shop') { state = 'shop'; shopMsg = ''; }
   else if (id === 'back') { state = 'menu'; persistNow(); }
+  else if (id === 'skip-onboarding') { if (!save.hintDone) { save.hintDone = true; persistNow(); } }
   else if (id === 'music') { save.musicOn = !save.musicOn; setMusicOn(save.musicOn); persistNow(); }
   else if (id === 'pu-slowmo') usePowerup('slowmo');
   else if (id === 'pu-magnet') usePowerup('magnet');
@@ -421,7 +434,9 @@ canvas.addEventListener('pointerdown', (e) => {
 });
 
 window.addEventListener('keydown', (e) => {
-  if (e.code === 'Space' || e.code === 'Enter') {
+  // Use physical codes exclusively: a French AZERTY keyboard still exposes
+  // the same Space code regardless of its locale-specific key value.
+  if (e.code === 'Space') {
     unlockAudio();
     if (save && save.musicOn && !getMusicOn()) setMusicOn(true);
     if (paused) return;
@@ -434,7 +449,11 @@ window.addEventListener('keydown', (e) => {
     if (e.code === 'Digit1') usePowerup('slowmo');
     if (e.code === 'Digit2') usePowerup('magnet');
   }
-  if (e.code === 'Escape' && state === 'shop') { state = 'menu'; persistNow(); }
+  // Escape is convenience only: the visible BACK button and Backspace always
+  // offer an in-game way out of the Shop as required by browser fullscreen.
+  if ((e.code === 'Escape' || e.code === 'Backspace') && state === 'shop') {
+    state = 'menu'; persistNow(); e.preventDefault();
+  }
 });
 
 // ---------- update ----------
@@ -575,12 +594,15 @@ function drawSky() {
   const groundA = Math.max(0, 1 - level / 18);
   if (groundA > 0) {
     const baseY = viewTop + viewH - 40 + camY * 0.85;
+    // The menu's skyline slowly slides beneath the title, giving the static
+    // opening screen the same living-city feel as a run.
+    const cityDrift = state === 'menu' ? (windT * 11) % 61 : 0;
     ctx.fillStyle = `rgba(30,40,70,${(0.5 * groundA).toFixed(3)})`;
-    const start = Math.floor((viewLeft - 80) / 61), end = Math.ceil((viewLeft + viewW + 80) / 61);
+    const start = Math.floor((viewLeft - 80) / 61) - 1, end = Math.ceil((viewLeft + viewW + 80) / 61) + 1;
     for (let i = start; i < end; i++) {
       const bw = 34 + (i * 53) % 40;
       const bh2 = 60 + (i * 97) % 130;
-      const bx = i * 61;
+      const bx = i * 61 + cityDrift;
       ctx.fillRect(bx, baseY - bh2, bw, bh2 + 60);
       // lit windows in the silhouette
       ctx.fillStyle = `rgba(255,230,140,${(0.35 * groundA).toFixed(3)})`;
@@ -789,11 +811,12 @@ function drawBlock(cx, y, w, hue, glow, lv, perfectT) {
 function drawCrane(mx, my, w) {
   const topY = -20;
   const recoil = ropePulse > 0 ? Math.sin(ropePulse * 40) * 4 * ropePulse : 0;
+  const tension = reducedMotion ? 0 : Math.sin(windT * 6 + mx * 0.025) * 1.4;
   ctx.strokeStyle = 'rgba(40,44,60,0.75)';
   ctx.lineWidth = 3;
   ctx.beginPath();
   ctx.moveTo(mx + recoil, topY);
-  ctx.lineTo(mx, my - 10);
+  ctx.quadraticCurveTo(mx + recoil * 0.35, (topY + my - 10) / 2 + 7 + tension, mx, my - 10);
   ctx.stroke();
   // hook plate
   ctx.fillStyle = 'rgba(50,55,75,0.9)';
@@ -874,6 +897,28 @@ function drawBtn(cx, cy, w, h, label, id, color, fontSize = 26) {
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText(label, cx, cy + 1);
   buttons.push({ x, y, w, h, id });
+}
+
+function drawOnboarding() {
+  const pulse = reducedMotion ? 1 : 0.88 + 0.12 * Math.sin(windT * 5);
+  const x = GAME_W / 2, y = GAME_H - 190;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(pulse, pulse);
+  cloudPanel(-154, -58, 308, 112, 0.62);
+  // A tap ripple and physical Space key make this visual-first without an
+  // instruction wall. The one label deliberately names both input routes.
+  ctx.strokeStyle = '#bfe3ff'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(-82, -2, 20, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(-82, -2, 33, 0, Math.PI * 2); ctx.globalAlpha = 0.42; ctx.stroke(); ctx.globalAlpha = 1;
+  ctx.fillStyle = 'rgba(255,255,255,0.16)'; ctx.roundRect(-42, -23, 116, 42, 8); ctx.fill();
+  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.strokeRect(-41, -22, 114, 40);
+  ctx.fillStyle = '#ffffff'; ctx.font = '900 15px "Segoe UI", Arial, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('SPACE', 16, -2);
+  ctx.fillStyle = '#ffe86b'; ctx.font = '900 23px "Segoe UI", Arial, sans-serif';
+  ctx.fillText('TAP / SPACE', 0, 35);
+  ctx.restore();
+  drawBtn(GAME_W / 2, GAME_H - 112, 118, 42, 'SKIP', 'skip-onboarding', 'rgba(255,255,255,0.78)', 16);
 }
 
 // soft cloud-style rounded panel
@@ -1102,7 +1147,7 @@ function draw() {
   // particles
   for (const p of particles) {
     const a = 1 - p.t / p.life;
-    ctx.fillStyle = `hsla(${p.hue},85%,65%,${a.toFixed(3)})`;
+    ctx.fillStyle = p.dust ? `rgba(255,226,157,${(a * 0.68).toFixed(3)})` : `hsla(${p.hue},85%,65%,${a.toFixed(3)})`;
     ctx.beginPath(); ctx.arc(p.x, worldToScreen(p.y), 3.5 * a + 1, 0, Math.PI * 2); ctx.fill();
   }
 
@@ -1157,16 +1202,10 @@ function draw() {
     if (slowmoT > 0) { ctx.fillStyle = '#9fd4ff'; ctx.fillText('⏱ ' + slowmoT.toFixed(0) + 's', 16, 60); }
     if (magnetT > 0) { ctx.fillStyle = '#ffd29f'; ctx.fillText('🧲 ' + magnetT.toFixed(0) + 's', 16, slowmoT > 0 ? 84 : 60); }
 
-    // contextual first-play hint
-    if ((!save.hintDone || guideT > 0) && moving) {
-      const top = blocks[blocks.length - 1];
-      const aligned = Math.abs(moving.cx - top.cx) < top.w * 0.35;
-      const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 180);
-      ctx.textAlign = 'center';
-      ctx.fillStyle = aligned ? `rgba(123,255,176,${pulse.toFixed(2)})` : 'rgba(255,255,255,0.85)';
-      ctx.font = '800 28px "Segoe UI", Arial, sans-serif';
-      ctx.fillText(aligned ? 'TAP NOW!' : 'Match the landing shadow — tap to cut', GAME_W / 2, GAME_H - 140);
-    }
+    // First-run, first-floor-only, visual control onboarding. It disappears
+    // after a real release or via its visible Skip button and never returns in
+    // this save.
+    if (!save.hintDone && level === 0 && moving) drawOnboarding();
   }
 
   if (state === 'menu') {
@@ -1393,7 +1432,7 @@ async function boot() {
         slowmoT, magnetT, totalPlay: save.totalPlay,
         streak: save.streak.count, missions: save.daily.missions.map(m => ({ id: m.id, prog: m.prog, done: m.done })),
         runBaseW,
-        paused, guideT, risk: towerRisk(), adAvailable: sdkAvailable(), gameoverNotice,
+        paused, guideT, onboardingActive: !save.hintDone && level === 0 && !!moving, risk: towerRisk(), adAvailable: sdkAvailable(), gameoverNotice,
         shopMinTextCss: state === 'shop' && isDesktopLayout() ? 25 * viewScale : null,
         counts: { debris: debris.length, particles: particles.length, floaters: floaters.length, toasts: toasts.length, flyers: flyers.length, listeners: 5, loops: 1 },
       }),

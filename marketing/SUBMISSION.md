@@ -17,19 +17,20 @@ street to the edge of space.
 
 ## Full description
 
-Build the skyline with a single well-timed action. Release each moving floor
-above the tower, preserve as much width as possible, and chain PERFECT landings
-to recover space and earn Clouds.
+One precise drop can turn a moving floor into the next piece of a city climbing
+from the street towards space. Keep the overlap wide, line up a PERFECT landing
+for combo rewards and width recovery, then decide when a narrower tower is worth
+the risk.
 
-The landing shadow and cut-off preview make the opening clear without a tutorial
-wall. As the tower becomes narrower and higher, a gentle structural sway and a
-wind indicator make its risk readable while preserving the one-button timing
-loop. Climb through changing city, cloud, jetstream, orbital-night and space
-environments, with visible district rewards every 10 floors and landmark rewards
-every 25 floors.
+The opening uses a tappable visual TAP / SPACE prompt, landing shadow and cut
+preview; the prompt disappears after the first release. Higher floors add
+readable wind direction and tower sway, while city, cloud, jetstream,
+orbital-night and space backdrops mark the ascent. District rewards arrive every
+10 floors and landmark rewards every 25.
 
-Spend Clouds on architectural themes, wider starting floors, Slow-Mo and Magnet
-assists, then return for rotating daily missions and altitude rewards.
+Clouds earned during runs buy architectural themes, a wider starting floor,
+Slow-Mo and Magnet assists. Daily missions, streak bonuses, persistent best
+score and altitude rewards provide goals between short attempts.
 
 ## Current features
 
@@ -43,9 +44,15 @@ assists, then return for rotating daily missions and altitude rewards.
 
 ## Controls
 
-- Desktop: click or Space/Enter to release a floor; 1/2 use owned power-ups
+- Desktop: click or Space to release a floor (Space works on WASD and ZQSD /
+  AZERTY layouts); 1/2 use owned power-ups
 - Mobile: tap anywhere in play to release; all mobile buttons are at least 44
   CSS pixels
+
+## Typical session
+
+- A run usually lasts 1–5 minutes; quick retries suit short sessions, while
+  missions and upgrades support longer return play.
 
 ## SDK, data and ads
 
