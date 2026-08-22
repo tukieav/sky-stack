@@ -15,7 +15,7 @@ const portrait = H > W, square = Math.abs(W - H) < 4;
 const unit = Math.min(W / 1920, H / 1080);
 const heroX = portrait ? W * 0.54 : W * 0.69;
 const heroY = portrait ? H * 0.60 : H * 0.58;
-const heroScale = (portrait ? W / 800 : W / 1920) * (portrait ? 1.05 : 1);
+const heroScale = (portrait ? W / 800 : W / 1920) * (portrait ? 1.55 : 1.5);
 let seed = 71;
 function rnd(){ seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }
 function cloud(x, y, s, a) {
