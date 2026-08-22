@@ -1,5 +1,5 @@
 // Sky Stack — tap-timing tower builder for CrazyGames
-import { initSDK, getSDK, loadingStart, loadingStop, gameplayStart, gameplayStop, happytime, requestAd, getMuteSetting, onSettingsChange } from './sdk.js';
+import { initSDK, getSDK, loadingStart, loadingStop, gameplayStart, gameplayStop, happytime, requestAd, getMuteSetting, onSettingsChange, sdkAvailable } from './sdk.js';
 import { setMuted, unlockAudio, cutSound, perfectSound, growSound, gameOverSound, clickSound, coinSound, milestoneSound, setMusicOn, getMusicOn } from './audio.js';
 import { bindSDK } from './save.js';
 import { initMeta, persistNow, save, THEMES, themeById, buyTheme, WIDE_COSTS, wideBonus, buyWide, POWERUPS, buyPowerup, ensureDaily, missionProgress, checkStreak, difficultyFactor } from './meta.js';
@@ -72,6 +72,7 @@ let paused = false;
 let pauseReasons = new Set();
 let accumulator = 0;
 let reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+let gameoverNotice = '';
 
 for (let i = 0; i < 120; i++) {
   stars.push({ x: Math.random() * GAME_W, y: Math.random() * 4000, r: Math.random() * 1.6 + 0.4, a: 0.3 + Math.random() * 0.6 });
@@ -106,6 +107,7 @@ function resetGame() {
   slowmoT = 0; magnetT = 0;
   camY = 0; targetCamY = 0; shake = 0; hitStop = 0;
   guideT = firstPerfect ? 0 : 1;
+  gameoverNotice = '';
   spawnMoving();
 }
 
@@ -171,8 +173,12 @@ function checkMissions(x, y) {
 function doDrop() {
   if (!moving) return;
   const prev = blocks[blocks.length - 1];
+  // Collision, prediction and drawing must share this exact visible roof.
+  // Otherwise a swaying tower asks the player to time against pixels that
+  // are not actually used for a cut or PERFECT decision.
+  const prevCx = blockRenderCx(prev);
   const curL = moving.cx - moving.w / 2, curR = moving.cx + moving.w / 2;
-  const prevL = prev.cx - prev.w / 2, prevR = prev.cx + prev.w / 2;
+  const prevL = prevCx - prev.w / 2, prevR = prevCx + prev.w / 2;
   const oL = Math.max(curL, prevL), oR = Math.min(curR, prevR);
   const overlap = oR - oL;
   const y = moving.y;
@@ -198,18 +204,18 @@ function doDrop() {
     let w = moving.w;
     let grew = false;
     if (perfectCombo >= 3 && w < runBaseW) { w = Math.min(runBaseW, w + 10); grew = true; }
-    placed = { cx: prev.cx, w, level: moving.level, hue: moving.hue, perfectT: 0.9 };
+    placed = { cx: prevCx - swayFor(moving.level), w, level: moving.level, hue: moving.hue, perfectT: 0.9 };
     const bonus = 5 * perfectCombo;
     score += 1 + bonus;
     hitStop = 0.06;
     flashT = 0.18;
     perfectSound(perfectCombo);
-    burst(prev.cx, y + BH / 2, moving.hue, 26, 220);
-    burst(prev.cx, y + BH / 2, 48, 14, 300);   // gold sparks
-    floatText(prev.cx, y - 10, 'PERFECT!', '#ffe86b', 34);
-    floatText(prev.cx, y + 24, '+' + bonus, '#fff6c9', 22);
-    earnClouds(1 + Math.floor(perfectCombo / 3), prev.cx, y - 70);
-    if (grew) { growSound(); floatText(prev.cx, y - 44, 'GROW!', '#7bffb0', 24); }
+    burst(prevCx, y + BH / 2, moving.hue, 26, 220);
+    burst(prevCx, y + BH / 2, 48, 14, 300);   // gold sparks
+    floatText(prevCx, y - 10, 'PERFECT!', '#ffe86b', 34);
+    floatText(prevCx, y + 24, '+' + bonus, '#fff6c9', 22);
+    earnClouds(1 + Math.floor(perfectCombo / 3), prevCx, y - 70);
+    if (grew) { growSound(); floatText(prevCx, y - 44, 'GROW!', '#7bffb0', 24); }
   } else {
     perfectCombo = 0;
     const newW = overlap, newCx = (oL + oR) / 2;
@@ -222,7 +228,7 @@ function doDrop() {
       const cw = curR - prevR;
       addDebris({ x: prevR + cw / 2, y, w: cw, h: BH, vx: 60 + Math.random() * 60, vy: -30, rot: 0, vr: 2 + Math.random() * 2, hue: moving.hue, life: 2 });
     }
-    placed = { cx: newCx, w: newW, level: moving.level, hue: moving.hue };
+    placed = { cx: newCx - swayFor(moving.level), w: newW, level: moving.level, hue: moving.hue };
     score += 1;
     cutSound(moving.level);
     burst(newCx, y + BH / 2, moving.hue, 10, 130);
@@ -240,14 +246,14 @@ function doDrop() {
   if (level % 10 === 0 && level > 0) {
     const major = level % 25 === 0;
     const reward = major ? level : 5 + Math.floor(level / 10) * 2;
-    earnClouds(reward, placed.cx, y - 100);
+    earnClouds(reward, blockRenderCx(placed), y - 100);
     milestoneSound();
     happytime();
     toast(major ? 'LANDMARK FLOOR ' + level + '!' : 'DISTRICT UNLOCKED!', '+' + reward + ' ☁  ·  ' + districtName(level));
     shake = Math.max(shake, reducedMotion ? 1.5 : major ? 6 : 3);
   }
 
-  checkMissions(placed.cx, y);
+  checkMissions(blockRenderCx(placed), y);
 
   if (placed.w < MIN_W) { triggerGameOver(); return; }
   spawnMoving(placed.w);
@@ -255,6 +261,7 @@ function doDrop() {
 
 function triggerGameOver() {
   state = 'gameover';
+  if (!sdkAvailable()) gameoverNotice = 'Ads are unavailable here — PLAY AGAIN is ready.';
   shake = 18;
   gameOverSound();
   gameplayStop();
@@ -282,6 +289,11 @@ async function playAgain() {
 }
 
 async function doContinue() {
+  if (!sdkAvailable()) {
+    gameoverNotice = 'Ads are unavailable here — PLAY AGAIN is ready.';
+    state = 'gameover';
+    return false;
+  }
   state = 'ad';
   const ok = await requestAd('rewarded', {
     onStart: pauseForAd,
@@ -294,11 +306,18 @@ async function doContinue() {
     state = 'playing';
     gameplayStart();
   } else {
+    gameoverNotice = 'Ad unavailable — PLAY AGAIN is ready.';
     state = 'gameover';
   }
+  return ok;
 }
 
 async function doDoubleClouds() {
+  if (!sdkAvailable()) {
+    gameoverNotice = 'Ads are unavailable here — clouds were not changed.';
+    state = 'gameover';
+    return false;
+  }
   state = 'ad';
   const ok = await requestAd('rewarded', {
     onStart: pauseForAd,
@@ -313,6 +332,7 @@ async function doDoubleClouds() {
     toast('CLOUDS DOUBLED!', '☁ ' + cloudsRun + ' this run');
   }
   state = 'gameover';
+  return ok;
 }
 
 function usePowerup(id) {
@@ -658,9 +678,15 @@ function windDirection() {
 }
 
 function swayFor(lv) {
-  // Narrow, high towers visibly answer the wind without changing the input loop.
+  // Keep every visible floor on the indicated wind side. A gust changes the
+  // amount of bend, not its direction, so the meter remains intelligible.
   const amp = reducedMotion ? 0.8 : 1.6 + towerRisk() * 7;
-  return windDirection() * Math.sin(windT * 1.4 + lv * 0.12) * amp * Math.min(1, lv / Math.max(1, level || 1));
+  const gust = 0.25 + 0.75 * (0.5 + 0.5 * Math.sin(windT * 1.4 + lv * 0.12));
+  return windDirection() * gust * amp * Math.min(1, lv / Math.max(1, level || 1));
+}
+
+function blockRenderCx(block) {
+  return block.cx + swayFor(block.level);
 }
 
 function drawWindRisk() {
@@ -671,7 +697,7 @@ function drawWindRisk() {
   ctx.textAlign = 'left'; ctx.textBaseline = 'top';
   ctx.font = '800 14px "Segoe UI", Arial, sans-serif';
   ctx.fillStyle = risk > 0.62 ? '#ffd27b' : '#dceeff';
-  ctx.fillText('WIND ' + (dir > 0 ? '→' : '←') + '  ' + (risk > 0.62 ? 'HIGH' : risk > 0.32 ? 'STEADY' : 'LIGHT'), x, y);
+  ctx.fillText('TOWER SWAY ' + (dir > 0 ? '→' : '←') + '  ' + (risk > 0.62 ? 'HIGH' : risk > 0.32 ? 'STEADY' : 'LIGHT'), x, y);
   ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(x, y + 29, 126, 7);
   ctx.fillStyle = risk > 0.62 ? '#ffb36b' : '#8fc9ff'; ctx.fillRect(x, y + 29, 126 * Math.max(0.12, risk), 7);
 }
@@ -958,29 +984,32 @@ function drawDesktopUI() {
 
 function drawDesktopShop() {
   if (state !== 'shop' || !isDesktopLayout()) return;
-  const panelW = 560, x = GAME_W / 2 - panelW / 2, y = 92;
-  cloudPanel(x, y, panelW, 730, 0.68);
+  // Landscape uses height as its world scale. At 821x462, the old 16px
+  // labels became 7.7 CSS pixels. Keep this compact in height but spend the
+  // unused wide world on a larger, readable purchase surface.
+  const panelW = 960, x = GAME_W / 2 - panelW / 2, y = 65;
+  cloudPanel(x, y, panelW, 830, 0.68);
   ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-  ctx.fillStyle = '#ffffff'; ctx.font = '900 42px "Segoe UI", Arial, sans-serif';
-  ctx.fillText('CLOUD SHOP', GAME_W / 2, y + 28);
-  ctx.fillStyle = '#bfe3ff'; ctx.font = '800 25px "Segoe UI", Arial, sans-serif';
-  ctx.fillText('☁ ' + save.clouds + '  ·  spend Clouds between climbs', GAME_W / 2, y + 86);
-  ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(x + 28, y + 126, panelW - 56, 1);
-  ctx.fillStyle = '#ffe86b'; ctx.font = '800 21px "Segoe UI", Arial, sans-serif';
-  ctx.fillText('THEMES', GAME_W / 2, y + 148);
+  ctx.fillStyle = '#ffffff'; ctx.font = '900 50px "Segoe UI", Arial, sans-serif';
+  ctx.fillText('CLOUD SHOP', GAME_W / 2, y + 30);
+  ctx.fillStyle = '#bfe3ff'; ctx.font = '800 27px "Segoe UI", Arial, sans-serif';
+  ctx.fillText('☁ ' + save.clouds + '  ·  spend Clouds between climbs', GAME_W / 2, y + 96);
+  ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(x + 44, y + 145, panelW - 88, 1);
+  ctx.fillStyle = '#ffe86b'; ctx.font = '800 26px "Segoe UI", Arial, sans-serif';
+  ctx.fillText('THEMES', GAME_W / 2, y + 168);
   THEMES.forEach((t, i) => {
-    const col = i % 3, row = Math.floor(i / 3), bx = GAME_W / 2 - 180 + col * 180, by = y + 225 + row * 88;
+    const col = i % 3, row = Math.floor(i / 3), bx = GAME_W / 2 - 300 + col * 300, by = y + 265 + row * 96;
     const owned = save.themesOwned.includes(t.id), equipped = save.theme === t.id;
-    ctx.fillStyle = `hsl(${t.hue(i * 9)},${t.sat}%,55%)`; ctx.fillRect(bx - 62, by - 32, 124, 12);
-    drawBtn(bx, by + 8, 156, 48, equipped ? '✓ ' + t.name : owned ? t.name : t.name + ' · ' + t.cost + '☁', 'theme-' + t.id, equipped ? '#7bffb0' : owned ? '#ffe86b' : 'rgba(255,255,255,0.88)', 16);
+    ctx.fillStyle = `hsl(${t.hue(i * 9)},${t.sat}%,55%)`; ctx.fillRect(bx - 108, by - 40, 216, 15);
+    drawBtn(bx, by + 12, 260, 60, equipped ? '✓ ' + t.name : owned ? t.name : t.name + ' · ' + t.cost + '☁', 'theme-' + t.id, equipped ? '#7bffb0' : owned ? '#ffe86b' : 'rgba(255,255,255,0.88)', 25);
   });
-  ctx.fillStyle = '#ffe86b'; ctx.font = '800 21px "Segoe UI", Arial, sans-serif';
-  ctx.fillText('UPGRADES', GAME_W / 2, y + 423);
+  ctx.fillStyle = '#ffe86b'; ctx.font = '800 26px "Segoe UI", Arial, sans-serif';
+  ctx.fillText('UPGRADES', GAME_W / 2, y + 472);
   const wide = save.wideLvl >= 3 ? 'WIDER BASE · MAX' : 'WIDER BASE Lv' + (save.wideLvl + 1) + ' · ' + WIDE_COSTS[save.wideLvl] + '☁';
-  drawBtn(GAME_W / 2, y + 480, 430, 56, wide, 'buy-wide', save.wideLvl >= 3 ? 'rgba(160,160,160,0.7)' : '#ffe86b', 20);
-  POWERUPS.forEach((p, i) => drawBtn(GAME_W / 2, y + 550 + i * 68, 430, 56, p.name + ' ×' + save[p.id] + ' · ' + p.cost + '☁', 'buy-' + p.id, i ? '#ffd29f' : '#9fd4ff', 20));
-  if (shopMsgT > 0 && shopMsg) { ctx.fillStyle = '#ffe86b'; ctx.font = '800 20px "Segoe UI", Arial, sans-serif'; ctx.fillText(shopMsg, GAME_W / 2, y + 654); }
-  drawBtn(GAME_W / 2, y + 692, 260, 56, '← BACK', 'back', 'rgba(255,255,255,0.9)', 21);
+  drawBtn(GAME_W / 2, y + 535, 620, 68, wide, 'buy-wide', save.wideLvl >= 3 ? 'rgba(160,160,160,0.7)' : '#ffe86b', 27);
+  POWERUPS.forEach((p, i) => drawBtn(GAME_W / 2, y + 625 + i * 78, 620, 68, p.name + ' ×' + save[p.id] + ' · ' + p.cost + '☁', 'buy-' + p.id, i ? '#ffd29f' : '#9fd4ff', 26));
+  if (shopMsgT > 0 && shopMsg) { ctx.fillStyle = '#ffe86b'; ctx.font = '800 25px "Segoe UI", Arial, sans-serif'; ctx.fillText(shopMsg, GAME_W / 2, y + 754); }
+  drawBtn(GAME_W / 2, y + 798, 360, 64, '← BACK', 'back', 'rgba(255,255,255,0.9)', 26);
 }
 
 function worldToScreen(wy) { return wy + camY; }
@@ -1016,7 +1045,7 @@ function draw() {
   for (const b of blocks) {
     const sy = worldToScreen(levelY(b.level));
     if (sy > -BH - 12 && sy < GAME_H + BH) {
-      drawBlock(b.cx + swayFor(b.level), sy, b.w, b.hue, false, b.level, b.perfectT || 0);
+      drawBlock(blockRenderCx(b), sy, b.w, b.hue, false, b.level, b.perfectT || 0);
     }
   }
 
@@ -1031,21 +1060,23 @@ function draw() {
       ctx.save();
       ctx.globalAlpha = guideAlpha * (0.55 + 0.2 * Math.sin(windT * 5));
       ctx.fillStyle = '#bfe3ff';
-      ctx.fillRect(top.cx - top.w / 2, targetY, top.w, BH);
+      const topCx = blockRenderCx(top);
+      ctx.fillRect(topCx - top.w / 2, targetY, top.w, BH);
       ctx.setLineDash([7, 5]); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
-      ctx.strokeRect(top.cx - top.w / 2, targetY, top.w, BH);
+      ctx.strokeRect(topCx - top.w / 2, targetY, top.w, BH);
       ctx.setLineDash([]);
       ctx.restore();
     }
     if (top) {
-      const l = Math.max(moving.cx - moving.w / 2, top.cx - top.w / 2);
-      const r = Math.min(moving.cx + moving.w / 2, top.cx + top.w / 2);
+      const topCx = blockRenderCx(top);
+      const l = Math.max(moving.cx - moving.w / 2, topCx - top.w / 2);
+      const r = Math.min(moving.cx + moving.w / 2, topCx + top.w / 2);
       ctx.fillStyle = r > l ? 'rgba(123,255,176,0.24)' : 'rgba(255,110,110,0.22)';
       ctx.fillRect(l, my + BH - 5, Math.max(0, r - l), 5);
       ctx.strokeStyle = 'rgba(255,230,107,0.85)'; ctx.lineWidth = 1.5;
       ctx.setLineDash([5, 4]);
-      ctx.beginPath(); ctx.moveTo(top.cx - top.w / 2, my + BH + 8); ctx.lineTo(top.cx - top.w / 2, my + BH + 24);
-      ctx.moveTo(top.cx + top.w / 2, my + BH + 8); ctx.lineTo(top.cx + top.w / 2, my + BH + 24); ctx.stroke(); ctx.setLineDash([]);
+      ctx.beginPath(); ctx.moveTo(topCx - top.w / 2, my + BH + 8); ctx.lineTo(topCx - top.w / 2, my + BH + 24);
+      ctx.moveTo(topCx + top.w / 2, my + BH + 8); ctx.lineTo(topCx + top.w / 2, my + BH + 24); ctx.stroke(); ctx.setLineDash([]);
     }
     drawCrane(moving.cx, my, moving.w);
     drawBlock(moving.cx, my, moving.w, moving.hue, true, moving.level, 0);
@@ -1252,14 +1283,20 @@ function draw() {
     ctx.font = '600 24px "Segoe UI", Arial, sans-serif';
     ctx.fillStyle = 'rgba(255,255,255,0.8)';
     ctx.fillText('Best: ' + best + '    ·    ☁ +' + cloudsRun, GAME_W / 2, 340);
-    let by = 440;
-    if (!usedContinue) {
+    const adsAvailable = sdkAvailable();
+    let by = adsAvailable ? 440 : 472;
+    if (!usedContinue && adsAvailable) {
       drawBtn(GAME_W / 2, by, 340, 66, '▶ CONTINUE (AD)', 'continue', '#7bffb0');
       by += 90;
     }
-    if (!doubledClouds && cloudsRun > 0) {
+    if (!doubledClouds && cloudsRun > 0 && adsAvailable) {
       drawBtn(GAME_W / 2, by, 340, 66, '☁ ×2 CLOUDS (AD)', 'double', '#9fd4ff');
       by += 90;
+    }
+    if (!adsAvailable) {
+      ctx.fillStyle = 'rgba(255,255,255,0.72)';
+      ctx.font = '600 20px "Segoe UI", Arial, sans-serif';
+      ctx.fillText(gameoverNotice || 'Ads are unavailable here — PLAY AGAIN is ready.', GAME_W / 2, 410);
     }
     drawBtn(GAME_W / 2, by, 340, 66, 'PLAY AGAIN', 'again', '#ffe86b');
     ctx.fillStyle = 'rgba(255,255,255,0.55)';
@@ -1348,25 +1385,39 @@ async function boot() {
       getState: () => ({
         state, score, best, level, perfectCombo, usedContinue, blocks: blocks.length,
         movingW: moving ? moving.w : null, movingCx: moving ? moving.cx : null,
-        topCx: blocks.length ? blocks[blocks.length - 1].cx : null,
+        topCx: blocks.length ? blockRenderCx(blocks[blocks.length - 1]) : null,
+        topBaseCx: blocks.length ? blocks[blocks.length - 1].cx : null,
+        topSway: blocks.length ? swayFor(blocks[blocks.length - 1].level) : null,
         clouds: save.clouds, cloudsRun, theme: save.theme, themesOwned: save.themesOwned.slice(),
         wideLvl: save.wideLvl, slowmo: save.slowmo, magnet: save.magnet,
         slowmoT, magnetT, totalPlay: save.totalPlay,
         streak: save.streak.count, missions: save.daily.missions.map(m => ({ id: m.id, prog: m.prog, done: m.done })),
         runBaseW,
-        paused, guideT, risk: towerRisk(), counts: { debris: debris.length, particles: particles.length, floaters: floaters.length, toasts: toasts.length, flyers: flyers.length, listeners: 5, loops: 1 },
+        paused, guideT, risk: towerRisk(), adAvailable: sdkAvailable(), gameoverNotice,
+        shopMinTextCss: state === 'shop' && isDesktopLayout() ? 25 * viewScale : null,
+        counts: { debris: debris.length, particles: particles.length, floaters: floaters.length, toasts: toasts.length, flyers: flyers.length, listeners: 5, loops: 1 },
       }),
       addScore: (n) => { score += n; },
       start: () => { if (state === 'menu') startGame(); },
       restart: () => startGame(),
-      getButtons: () => buttons.map(b => ({ id: b.id, x: b.x + b.w / 2, y: b.y + b.h / 2 })),
+      getButtons: () => buttons.map(b => ({ id: b.id, x: b.x + b.w / 2, y: b.y + b.h / 2, w: b.w, h: b.h })),
       grantClouds: (n) => { save.clouds += n; persistNow(); },
       buyTheme: (id) => buyTheme(id),
       buyWide: () => buyWide(),
       buyPowerup: (id) => buyPowerup(id),
       usePowerup: (id) => usePowerup(id),
-      alignMoving: () => { if (state === 'playing' && moving && blocks.length) moving.cx = blocks[blocks.length - 1].cx; },
+      alignMoving: () => { if (state === 'playing' && moving && blocks.length) moving.cx = blockRenderCx(blocks[blocks.length - 1]); },
+      setMovingCx: (x) => { if (state === 'playing' && moving && Number.isFinite(x)) moving.cx = x; },
+      setWindTime: (t) => { if (Number.isFinite(t)) windT = t; },
+      placementPreview: () => {
+        if (!moving || !blocks.length) return null;
+        const top = blocks[blocks.length - 1], renderedCx = blockRenderCx(top);
+        const overlapAt = (cx) => Math.min(moving.cx + moving.w / 2, cx + top.w / 2) - Math.max(moving.cx - moving.w / 2, cx - top.w / 2);
+        const threshold = (level < 3 ? 0.86 : (magnetT > 0 ? MAGNET_FRAC : PERFECT_FRAC)) * moving.w;
+        return { renderedCx, baseCx: top.cx, sway: swayFor(top.level), threshold, renderedOverlap: overlapAt(renderedCx), unswayedOverlap: overlapAt(top.cx) };
+      },
       drop: () => { if (state === 'playing') doDrop(); },
+      continueRun: () => doContinue(),
       resetSave: () => { try { localStorage.removeItem('skystack.save'); } catch (e) {} },
       openShop: () => { if (state === 'menu') state = 'shop'; },
       closeShop: () => { if (state === 'shop') state = 'menu'; },
