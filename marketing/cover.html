@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html>
-<head><meta charset="UTF-8"><style>html,body{margin:0;padding:0;background:#000}</style></head>
+<head><meta charset="UTF-8"><style>html,body{margin:0;padding:0;background:#73cfff}</style></head>
 <body>
 <canvas id="cover"></canvas>
 <script>
@@ -11,83 +11,55 @@ const H = parseInt(q.get('h') || '1080', 10);
 const canvas = document.getElementById('cover');
 canvas.width = W; canvas.height = H;
 const g = canvas.getContext('2d');
-const square = q.get('sq') === '1';
-const sq = H / 1080;
-
-// sky gradient: day at bottom → space at top
-const bg = g.createLinearGradient(0, 0, 0, H);
-bg.addColorStop(0, '#08102a'); bg.addColorStop(0.45, '#2a5aa8'); bg.addColorStop(1, '#8ec8f2');
-g.fillStyle = bg; g.fillRect(0, 0, W, H);
-
-// stars up top
-let seed = 7;
-function rnd(){seed=(seed*1103515245+12345)%2147483648;return seed/2147483648;}
-for (let i = 0; i < 180; i++) {
-  const x = rnd() * W, y = rnd() * H * 0.5, r = rnd() * 2 + 0.4;
-  g.fillStyle = 'rgba(255,255,255,' + (0.25 + rnd() * 0.6) * (1 - y / (H * 0.55)) + ')';
-  g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+const portrait = H > W, square = Math.abs(W - H) < 4;
+const unit = Math.min(W / 1920, H / 1080);
+const heroX = portrait ? W * 0.54 : W * 0.69;
+const heroY = portrait ? H * 0.60 : H * 0.58;
+const heroScale = (portrait ? W / 800 : W / 1920) * (portrait ? 1.05 : 1);
+let seed = 71;
+function rnd(){ seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }
+function cloud(x, y, s, a) {
+  g.fillStyle = `rgba(255,255,255,${a})`; g.beginPath();
+  g.ellipse(x - s*.34, y + s*.08, s*.38, s*.19, 0, 0, Math.PI * 2);
+  g.ellipse(x, y - s*.05, s*.44, s*.27, 0, 0, Math.PI * 2);
+  g.ellipse(x + s*.38, y + s*.10, s*.34, s*.17, 0, 0, Math.PI * 2); g.fill();
 }
-
-// clouds lower
-g.fillStyle = 'rgba(255,255,255,0.30)';
-[[0.12,0.82,150],[0.85,0.72,180],[0.3,0.92,130]].forEach(([fx,fy,r])=>{
-  g.beginPath();
-  g.ellipse(W*fx, H*fy, r*sq, r*0.3*sq, 0, 0, Math.PI*2);
-  g.ellipse(W*fx+r*0.6*sq, H*fy+10*sq, r*0.7*sq, r*0.24*sq, 0, 0, Math.PI*2);
-  g.fill();
-});
-
-// tower of rainbow blocks
-function block(cx, y, w, h, hue, glow) {
-  const x = cx - w / 2;
-  if (glow) { g.shadowColor = 'hsla(' + hue + ',90%,70%,0.9)'; g.shadowBlur = 40 * sq; }
-  const grad = g.createLinearGradient(x, y, x, y + h);
-  grad.addColorStop(0, 'hsl(' + hue + ',72%,62%)');
-  grad.addColorStop(1, 'hsl(' + hue + ',72%,44%)');
-  g.fillStyle = grad; g.fillRect(x, y, w, h);
-  g.shadowBlur = 0;
-  g.fillStyle = 'rgba(255,255,255,0.22)'; g.fillRect(x, y, w, h * 0.14);
-  g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(x, y + h * 0.86, w, h * 0.14);
+function glossyBlock(cx, cy, w, h, hue, face) {
+  const x = cx - w / 2, y = cy - h / 2, d = Math.min(h * .3, 24 * heroScale);
+  g.save(); g.shadowColor = 'rgba(26,72,142,.34)'; g.shadowBlur = 22 * heroScale; g.shadowOffsetY = 13 * heroScale;
+  const grad = g.createLinearGradient(x, y, x, y + h); grad.addColorStop(0, `hsl(${hue},98%,75%)`); grad.addColorStop(.44, `hsl(${hue},88%,58%)`); grad.addColorStop(1, `hsl(${hue},78%,39%)`);
+  g.fillStyle = grad; g.beginPath(); g.roundRect(x, y, w, h, 16 * heroScale); g.fill(); g.shadowBlur = 0;
+  g.fillStyle = `hsla(${hue},90%,32%,.58)`; g.beginPath(); g.moveTo(x+w,y); g.lineTo(x+w+d,y+d); g.lineTo(x+w+d,y+h+d); g.lineTo(x+w,y+h); g.closePath(); g.fill();
+  g.fillStyle = 'rgba(255,255,255,.42)'; g.beginPath(); g.roundRect(x + w*.08, y + h*.1, w*.62, h*.17, 9 * heroScale); g.fill();
+  g.fillStyle = 'rgba(255,255,255,.20)'; g.beginPath(); g.ellipse(x + w*.25, y + h*.42, w*.13, h*.20, -.45, 0, Math.PI*2); g.fill();
+  if (face) { g.fillStyle = '#16375c'; g.beginPath(); g.arc(cx-w*.14, cy+h*.06, h*.095, 0, Math.PI*2); g.arc(cx+w*.14, cy+h*.06, h*.095, 0, Math.PI*2); g.fill(); g.strokeStyle='#16375c'; g.lineWidth=Math.max(3, h*.055); g.lineCap='round'; g.beginPath(); g.arc(cx,cy+h*.19,w*.13,0,Math.PI); g.stroke(); }
+  g.restore();
 }
-
-const bh = 64 * sq;
-const towerCx = square ? W * 0.5 : W * 0.72;
-const n = square ? 9 : 12;
-for (let i = 0; i < n; i++) {
-  const hue = (i * 24) % 360;
-  const w = (420 - i * 14) * sq;
-  const jitter = Math.sin(i * 1.7) * 16 * sq;
-  block(towerCx + jitter, H - (i + 1) * bh - (square ? H*0.06 : 0), w, bh, hue, false);
-}
-// moving glowing block at top
-const topY = H - (n + 1) * bh - 26 * sq - (square ? H*0.06 : 0);
-block(towerCx + (square ? 130 : 180) * sq, topY, (420 - n * 14) * sq, bh, (n * 24) % 360, true);
-// debris falling
-g.save();
-g.translate(towerCx - 260 * sq, topY + 150 * sq); g.rotate(-0.5);
-g.fillStyle = 'hsl(' + ((n - 1) * 24 % 360) + ',70%,50%)';
-g.fillRect(0, 0, 110 * sq, bh * 0.8);
+// Bright day-sky arena: all stops deliberately remain luminous.
+const bg = g.createLinearGradient(0, 0, W, H); bg.addColorStop(0, '#43b9ff'); bg.addColorStop(.42, '#7a8cff'); bg.addColorStop(.72, '#b475ef'); bg.addColorStop(1, '#ffd17a'); g.fillStyle = bg; g.fillRect(0, 0, W, H);
+const sun = g.createRadialGradient(W*.15, H*.18, 12*unit, W*.15, H*.18, 260*unit); sun.addColorStop(0,'rgba(255,252,211,.98)'); sun.addColorStop(.18,'rgba(255,228,125,.62)'); sun.addColorStop(1,'rgba(255,228,125,0)'); g.fillStyle=sun; g.fillRect(0,0,W,H);
+g.save(); g.translate(W*.16,H*.15); g.globalAlpha=.19; g.fillStyle='#fff5c8'; for(let i=0;i<13;i++){g.save();g.rotate(i*Math.PI/6.5);g.beginPath();g.moveTo(0,0);g.lineTo(W*.82, -26*unit);g.lineTo(W*.82,26*unit);g.closePath();g.fill();g.restore();}g.restore();
+for(let i=0;i<35;i++){const x=rnd()*W,y=rnd()*H*.64;g.fillStyle=`rgba(255,255,255,${.15+rnd()*.25})`;g.beginPath();g.arc(x,y,(1+rnd()*3)*unit,0,Math.PI*2);g.fill();}
+cloud(W*.13,H*.69,170*unit,.38); cloud(W*.88,H*.29,145*unit,.32); cloud(W*.78,H*.86,240*unit,.38); cloud(W*.35,H*.93,180*unit,.3);
+// soft distant silhouettes create depth without putting dark empty areas in the cover.
+g.fillStyle='rgba(68,92,190,.24)'; for(let x=-20*unit;x<W+60*unit;x+=70*unit){const h=(90+((x/unit*13)%80))*unit;g.fillRect(x,H-h,52*unit,h);g.fillRect(x+10*unit,H-h-25*unit,30*unit,25*unit);}
+// Hero crane: a friendly large construction companion with a glossy block payload.
+g.save(); g.translate(heroX,heroY); g.scale(heroScale,heroScale); g.shadowColor='rgba(45,48,150,.30)'; g.shadowBlur=30; g.shadowOffsetY=18;
+g.fillStyle='#2a4e96'; g.beginPath(); g.roundRect(-68,158,136,32,14); g.fill(); g.fillStyle='#ffe05c'; g.beginPath(); g.roundRect(-35,-95,70,270,18); g.fill(); g.shadowBlur=0;
+g.fillStyle='#fff2a5'; g.fillRect(-22,-80,13,225); g.fillStyle='#da8d32'; g.fillRect(16,-79,12,224);
+g.fillStyle='#ffcf3a'; g.beginPath(); g.moveTo(-12,-102);g.lineTo(295,-158);g.lineTo(302,-125);g.lineTo(0,-62);g.closePath();g.fill(); g.fillStyle='rgba(255,255,255,.45)';g.fillRect(12,-91,214,10);
+g.strokeStyle='#29498a';g.lineWidth=8;g.lineCap='round';g.beginPath();g.moveTo(270,-143);g.lineTo(282,72);g.stroke();g.beginPath();g.moveTo(282,72);g.lineTo(238,92);g.stroke();
+g.fillStyle='#f96c60';g.beginPath();g.roundRect(-73,-160,146,73,24);g.fill();g.fillStyle='rgba(255,255,255,.3)';g.beginPath();g.roundRect(-56,-146,63,17,8);g.fill();
+g.fillStyle='#193a76';g.beginPath();g.arc(-25,-123,9,0,Math.PI*2);g.arc(25,-123,9,0,Math.PI*2);g.fill();g.strokeStyle='#193a76';g.lineWidth=6;g.beginPath();g.arc(0,-110,25,0,Math.PI);g.stroke();
 g.restore();
-
-// title
-g.textAlign = square ? 'center' : 'left';
-g.textBaseline = 'middle';
-g.shadowColor = 'rgba(120,200,255,0.9)'; g.shadowBlur = 34 * sq;
-g.fillStyle = '#ffffff';
-if (!square) {
-  g.font = '900 ' + (170 * sq) + 'px "Segoe UI", Arial, sans-serif';
-  g.fillText('SKY', W * 0.06, H * 0.30);
-  g.fillText('STACK', W * 0.06, H * 0.47);
-  g.shadowBlur = 0;
-  g.fillStyle = 'rgba(255,255,255,0.9)';
-  g.font = '600 ' + (48 * sq) + 'px "Segoe UI", Arial, sans-serif';
-  g.fillText('Tap to drop. Stack to the stars.', W * 0.062, H * 0.60);
-} else {
-  g.font = '900 ' + (150 * sq) + 'px "Segoe UI", Arial, sans-serif';
-  g.fillText('SKY', W * 0.5, H * 0.12);
-  g.fillText('STACK', W * 0.5, H * 0.26);
-  g.shadowBlur = 0;
-}
+const levels = portrait ? 6 : 7; for(let i=0;i<levels;i++){const w=(270-i*15)*heroScale,h=50*heroScale;glossyBlock(heroX-34*heroScale+Math.sin(i*2.2)*12*heroScale, H-(92+i*52)*heroScale, w,h,(i*34+4)%360,i===levels-1);}
+glossyBlock(heroX+230*heroScale, heroY+95*heroScale, 150*heroScale,58*heroScale,322,true);
+// Title: the only text on cover art, intentionally oversized and outlined for thumbnails.
+const titleX = portrait ? W*.5 : W*.27, titleY = portrait ? H*.125 : H*.26;
+const titleSize = portrait ? Math.min(W*.165, H*.115) : Math.min(W*.12,H*.21);
+g.save();g.textAlign='center';g.textBaseline='middle';g.font=`900 ${titleSize}px "Arial Rounded MT Bold", "Trebuchet MS", Arial, sans-serif`;g.lineJoin='round';
+g.shadowColor='rgba(55,48,142,.42)';g.shadowBlur=0;g.shadowOffsetX=9*unit;g.shadowOffsetY=12*unit;g.lineWidth=17*unit;g.strokeStyle='#4c3b9b';g.strokeText('SKY',titleX,titleY);g.strokeText('STACK',titleX,titleY+titleSize*.88);
+g.shadowOffsetX=0;g.shadowOffsetY=0;g.lineWidth=9*unit;g.strokeStyle='#fff4ad';g.strokeText('SKY',titleX,titleY);g.strokeText('STACK',titleX,titleY+titleSize*.88);g.fillStyle='#ffffff';g.fillText('SKY',titleX,titleY);g.fillText('STACK',titleX,titleY+titleSize*.88);g.restore();
 document.title = 'ready';
 </script>
 </body>

@@ -1210,18 +1210,26 @@ function draw() {
 
   if (state === 'menu') {
     const desktop = isDesktopLayout();
-    if (desktop) cloudPanel(66, 104, GAME_W - 132, 430, 0.48);
+    // A warm, animated sunrise keeps the first game frame in the same cheerful
+    // visual family as the bright marketing cover without changing in-run art.
+    const menuGlow = ctx.createRadialGradient(GAME_W * .22, 130, 8, GAME_W * .22, 130, 330);
+    menuGlow.addColorStop(0, 'rgba(255,244,172,0.42)'); menuGlow.addColorStop(0.5, 'rgba(155,220,255,0.14)'); menuGlow.addColorStop(1, 'rgba(155,220,255,0)');
+    ctx.fillStyle = menuGlow; ctx.fillRect(0, 0, GAME_W, GAME_H);
+    ctx.save(); ctx.translate(GAME_W * .22, 130); ctx.globalAlpha = .13;
+    ctx.fillStyle = '#fff2a8'; for (let i = 0; i < 9; i++) { ctx.save(); ctx.rotate(i * Math.PI / 4.5 + windT * .035); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(500, -10); ctx.lineTo(500, 10); ctx.closePath(); ctx.fill(); ctx.restore(); } ctx.restore();
+    if (desktop) cloudPanel(66, 104, GAME_W - 132, 430, 0.40);
     else {
       ctx.fillStyle = 'rgba(0,0,0,0.25)';
       ctx.fillRect(0, 0, GAME_W, GAME_H);
     }
     ctx.fillStyle = '#ffffff';
-    ctx.shadowColor = 'rgba(120,180,255,0.9)'; ctx.shadowBlur = 24;
+    ctx.shadowColor = 'rgba(91,72,176,0.65)'; ctx.shadowBlur = 0; ctx.shadowOffsetX = 4; ctx.shadowOffsetY = 6;
     ctx.font = `900 ${desktop ? 62 : 84}px "Segoe UI", Arial, sans-serif`;
     ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-    if (desktop) ctx.fillText('SKY STACK', GAME_W / 2, 150);
-    else { ctx.fillText('SKY', GAME_W / 2, 150); ctx.fillText('STACK', GAME_W / 2, 240); }
-    ctx.shadowBlur = 0;
+    ctx.lineJoin = 'round'; ctx.lineWidth = desktop ? 7 : 9; ctx.strokeStyle = '#fff0a3';
+    if (desktop) { ctx.strokeText('SKY STACK', GAME_W / 2, 150); ctx.fillText('SKY STACK', GAME_W / 2, 150); }
+    else { ctx.strokeText('SKY', GAME_W / 2, 150); ctx.fillText('SKY', GAME_W / 2, 150); ctx.strokeText('STACK', GAME_W / 2, 240); ctx.fillText('STACK', GAME_W / 2, 240); }
+    ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
     ctx.font = '600 24px "Segoe UI", Arial, sans-serif';
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
     const subY = desktop ? 245 : 350;

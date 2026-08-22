@@ -9,6 +9,7 @@
     "dev": "esbuild src/main.js --bundle --outfile=dist/bundle.js --watch --servedir=dist",
     "test:polish": "node tests/final-polish.mjs ${BASE_URL:-http://localhost:8525/}",
     "test:compliance": "node tests/round3-compliance.mjs ${BASE_URL:-http://localhost:8525/}",
+    "test:cover-brightness": "node scripts/cover-brightness.mjs",
     "test": "node tests/e2e.mjs ${BASE_URL:-http://localhost:8525/} && node tests/determinism.mjs && node tools/e2e-viewport.cjs ${BASE_URL:-http://localhost:8525/} && node tools/e2e-lifecycle.cjs ${BASE_URL:-http://localhost:8525/} && node tools/e2e-soak.cjs ${BASE_URL:-http://localhost:8525/} && npm run test:polish && npm run test:compliance"
   },
   "devDependencies": {
