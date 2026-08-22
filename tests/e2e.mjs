@@ -153,8 +153,11 @@ ok(s.state === 'gameover', 'expected gameover, got ' + s.state);
 console.log('gameover state:', JSON.stringify({ score: s.score, clouds: s.clouds, cloudsRun: s.cloudsRun }));
 await page.screenshot({ path: 'tests/shot-gameover.png' });
 
-// rewarded CONTINUE
-if (await clickBtn('continue')) {
+// Rewarded CONTINUE is intentionally hidden when this no-SDK run cannot show
+// an ad; the visible PLAY AGAIN fallback must remain available.
+const continueButton = (await btns()).find(b => b.id === 'continue');
+if (continueButton) {
+  await clickBtn('continue');
   s = await waitState((q) => q.state !== 'ad', 25000);
   console.log('after continue:', JSON.stringify({ state: s.state, usedContinue: s.usedContinue }));
   if (s.state === 'playing') {
@@ -164,6 +167,7 @@ if (await clickBtn('continue')) {
     s = await waitState((q) => q.state === 'gameover', 3000);
   }
 }
+else ok(!(await st()).adAvailable, 'continue missing even though ads are available');
 ok(s.state === 'gameover', 'expected gameover before play again, got ' + s.state);
 
 // PLAY AGAIN (instant restart / midgame throttled)
