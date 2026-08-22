@@ -138,6 +138,14 @@ function burst(x, y, hue, n, spd) {
     particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 60, life: 0.7 + Math.random() * 0.4, t: 0, hue });
   }
 }
+function impactDust(x, y) {
+  const available = Math.max(0, MAX_PARTICLES - particles.length);
+  for (let i = 0; i < Math.min(16, available); i++) {
+    const a = Math.PI + (Math.random() - 0.5) * 1.35;
+    const v = 45 + Math.random() * 105;
+    particles.push({ x, y: y + 3, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 18, life: 0.32 + Math.random() * 0.24, t: 0, hue: 42, dust: true });
+  }
+}
 function floatText(x, y, text, color, size = 26) {
   floaters.push({ x, y, text, life: 1.1, t: 0, color, size });
   if (floaters.length > MAX_FLOATERS) floaters.splice(0, floaters.length - MAX_FLOATERS);
@@ -194,6 +202,9 @@ function doDrop() {
     triggerGameOver();
     return;
   }
+  // A short warm dust puff anchors every successful drop to the tower before
+  // the cut/perfect effects take over.
+  impactDust((oL + oR) / 2, y + BH);
 
   // The opening is deliberately friendly: newcomers get three broad perfect
   // windows before the normal timing challenge takes over.
@@ -583,12 +594,15 @@ function drawSky() {
   const groundA = Math.max(0, 1 - level / 18);
   if (groundA > 0) {
     const baseY = viewTop + viewH - 40 + camY * 0.85;
+    // The menu's skyline slowly slides beneath the title, giving the static
+    // opening screen the same living-city feel as a run.
+    const cityDrift = state === 'menu' ? (windT * 11) % 61 : 0;
     ctx.fillStyle = `rgba(30,40,70,${(0.5 * groundA).toFixed(3)})`;
-    const start = Math.floor((viewLeft - 80) / 61), end = Math.ceil((viewLeft + viewW + 80) / 61);
+    const start = Math.floor((viewLeft - 80) / 61) - 1, end = Math.ceil((viewLeft + viewW + 80) / 61) + 1;
     for (let i = start; i < end; i++) {
       const bw = 34 + (i * 53) % 40;
       const bh2 = 60 + (i * 97) % 130;
-      const bx = i * 61;
+      const bx = i * 61 + cityDrift;
       ctx.fillRect(bx, baseY - bh2, bw, bh2 + 60);
       // lit windows in the silhouette
       ctx.fillStyle = `rgba(255,230,140,${(0.35 * groundA).toFixed(3)})`;
@@ -797,11 +811,12 @@ function drawBlock(cx, y, w, hue, glow, lv, perfectT) {
 function drawCrane(mx, my, w) {
   const topY = -20;
   const recoil = ropePulse > 0 ? Math.sin(ropePulse * 40) * 4 * ropePulse : 0;
+  const tension = reducedMotion ? 0 : Math.sin(windT * 6 + mx * 0.025) * 1.4;
   ctx.strokeStyle = 'rgba(40,44,60,0.75)';
   ctx.lineWidth = 3;
   ctx.beginPath();
   ctx.moveTo(mx + recoil, topY);
-  ctx.lineTo(mx, my - 10);
+  ctx.quadraticCurveTo(mx + recoil * 0.35, (topY + my - 10) / 2 + 7 + tension, mx, my - 10);
   ctx.stroke();
   // hook plate
   ctx.fillStyle = 'rgba(50,55,75,0.9)';
@@ -1132,7 +1147,7 @@ function draw() {
   // particles
   for (const p of particles) {
     const a = 1 - p.t / p.life;
-    ctx.fillStyle = `hsla(${p.hue},85%,65%,${a.toFixed(3)})`;
+    ctx.fillStyle = p.dust ? `rgba(255,226,157,${(a * 0.68).toFixed(3)})` : `hsla(${p.hue},85%,65%,${a.toFixed(3)})`;
     ctx.beginPath(); ctx.arc(p.x, worldToScreen(p.y), 3.5 * a + 1, 0, Math.PI * 2); ctx.fill();
   }
 
