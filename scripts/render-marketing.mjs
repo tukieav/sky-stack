@@ -1,7 +1,7 @@
 // Regenerates full marketing kit from REAL gameplay with the new art:
 //  - marketing/screenshot-1.png / screenshot-2.png (1920x1080)
-//  - marketing/cover-16x9.png (1920x1080), cover-1x1.png (1080x1080), cover-2x3.png (800x1200)
-//  - marketing/video-landscape.mp4 (<20s) via recordVideo + ffmpeg
+//  - marketing/cover-16x9.png (1920x1080), cover-1x1.png (800x800), cover-2x3.png (800x1200)
+//  - 17s cover-led, no-audio gameplay videos via recordVideo + ffmpeg
 import { chromium } from 'playwright';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -58,7 +58,7 @@ async function playTo(page, floor) {
 }
 
 // ---------- screenshots 1920x1080 ----------
-{
+if (!process.env.MARKETING_VIDEO) {
   const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
   await prep(page);
   await clickPlay(page);
@@ -76,7 +76,7 @@ async function playTo(page, floor) {
 }
 
 // ---------- covers: play to nice height, grab canvas, compose with title ----------
-{
+if (!process.env.MARKETING_VIDEO) {
   const page = await browser.newPage({ viewport: { width: 700, height: 1100 } });
   await prep(page);
   await clickPlay(page);
@@ -87,7 +87,7 @@ async function playTo(page, floor) {
   const dataUrl = await page.evaluate(() => document.getElementById('game').toDataURL('image/png'));
   await page.close();
 
-  for (const [W, H, out] of [[1920, 1080, 'cover-16x9.png'], [1080, 1080, 'cover-1x1.png'], [800, 1200, 'cover-2x3.png']]) {
+  for (const [W, H, out] of [[1920, 1080, 'cover-16x9.png'], [800, 800, 'cover-1x1.png'], [800, 1200, 'cover-2x3.png']]) {
     const p2 = await browser.newPage({ viewport: { width: W, height: H } });
     await p2.setContent(`<html><body style="margin:0"><canvas id="c" width="${W}" height="${H}"></canvas></body></html>`);
     await p2.evaluate(async ({ dataUrl, W, H }) => {
@@ -130,16 +130,8 @@ async function playTo(page, floor) {
       if (W > H) {
         g.strokeText('SKY', tx, ty); g.fillStyle = '#ffffff'; g.fillText('SKY', tx, ty);
         g.strokeText('STACK', tx, ty + ts * 0.15); g.fillText('STACK', tx, ty + ts * 0.15);
-        g.shadowBlur = 0;
-        g.font = `700 ${Math.round(ts * 0.042)}px "Segoe UI", Arial, sans-serif`;
-        g.fillStyle = '#ffe86b';
-        g.fillText('STACK TO THE STARS', tx, ty + ts * 0.245);
       } else {
         g.strokeText('SKY STACK', tx, ty); g.fillStyle = '#ffffff'; g.fillText('SKY STACK', tx, ty);
-        g.shadowBlur = 0;
-        g.font = `700 ${Math.round(ts * 0.045)}px "Segoe UI", Arial, sans-serif`;
-        g.fillStyle = '#ffe86b';
-        g.fillText('STACK TO THE STARS', tx, ty + ts * 0.075);
       }
     }, { dataUrl, W, H });
     await p2.locator('#c').screenshot({ path: root + '/marketing/' + out });
@@ -148,24 +140,31 @@ async function playTo(page, floor) {
   }
 }
 
-// ---------- videos <20s: landscape + portrait ----------
-for (const [vw, vh, name] of [[1280, 720, 'video-landscape'], [540, 960, 'video-portrait']]) {
+// ---------- videos: exact cover opening, then fresh active gameplay ----------
+for (const [vw, vh, name, cover] of [
+  [1920, 1080, 'video-landscape', 'cover-16x9.png'],
+  [720, 1080, 'video-portrait', 'cover-2x3.png'],
+].filter(([, , name]) => !process.env.MARKETING_VIDEO || name === `video-${process.env.MARKETING_VIDEO}`)) {
   const dir = root + '/marketing/_vid';
   rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true });
   const ctx2 = await browser.newContext({ viewport: { width: vw, height: vh }, recordVideo: { dir, size: { width: vw, height: vh } } });
   const page = await ctx2.newPage();
   await prep(page);
   await clickPlay(page);
+  // The recorded file begins at page creation, so trim the boot/menu portion
+  // below. This loop is deliberately aligned to stay in active gameplay.
   const t0 = Date.now();
-  while (Date.now() - t0 < 9000) {
+  while (Date.now() - t0 < 18500) {
     const s = await smartDrop(page);
-    if (s.state !== 'playing') break;
-    await page.waitForTimeout(380);
+    if (s.state !== 'playing') { await page.evaluate(() => window.__astro.restart()); continue; }
+    await page.waitForTimeout(310);
   }
-  await page.waitForTimeout(400);
   await page.close(); await ctx2.close();
   const webm = dir + '/' + readdirSync(dir).find(f => f.endsWith('.webm'));
-  execSync(`ffmpeg -y -i "${webm}" -t 12 -an -c:v libx264 -pix_fmt yuv420p -crf 23 -movflags +faststart "${root}/marketing/${name}.mp4" 2>/dev/null`);
+  // 0.7 seconds of the corresponding cover is the exact opening visual. The
+  // following trim starts after boot/play and yields 17 seconds total, with no
+  // audio track, menus, game-over panel or cursor in the submitted asset.
+  execSync(`ffmpeg -y -loop 1 -framerate 30 -t 0.7 -i "${root}/marketing/${cover}" -ss 2.5 -i "${webm}" -filter_complex "[0:v]fps=30,scale=${vw}:${vh},format=yuv420p[cover];[1:v]fps=30,trim=duration=16.3,setpts=PTS-STARTPTS,format=yuv420p[game];[cover][game]concat=n=2:v=1:a=0[v]" -map "[v]" -t 17 -an -c:v libx264 -pix_fmt yuv420p -crf 20 -movflags +faststart "${root}/marketing/${name}.mp4" 2>/dev/null`);
   rmSync(dir, { recursive: true, force: true });
   console.log('rendered', name + '.mp4');
 }
